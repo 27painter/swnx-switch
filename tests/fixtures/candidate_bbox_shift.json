@@ -1,0 +1,316 @@
+{
+  "schema": "swnx.ir/1",
+  "generated_at": "2026-11-13T17:42:31+08:00",
+  "generator": {
+    "name": "swnx-switch",
+    "version": "0.1.0",
+    "backend": "nx"
+  },
+  "source": {
+    "path": "D:\\27painter\\Documents\\swnx-switch\\out\\叉形接头.prt",
+    "format": "prt",
+    "size_bytes": 643210,
+    "sha256": "b7c2111111111111111111111111111111111111111111111111111111111111",
+    "app": "Siemens NX",
+    "app_version": "2406",
+    "readonly": true,
+    "notes": []
+  },
+  "model": {
+    "name": "叉形接头",
+    "kind": "part",
+    "units": "mm",
+    "material": {
+      "name": "Steel AISI 1045",
+      "density_kg_m3": 7850.0
+    },
+    "mass_properties": {
+      "volume_mm3": 125000.0,
+      "surface_area_mm2": 24800.0,
+      "mass_kg": 0.98125,
+      "density_kg_m3": 7850.0,
+      "centroid_mm": [
+        50.0,
+        25.0,
+        10.0
+      ],
+      "inertia_kg_mm2": [
+        [
+          1820.5,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          2630.25,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          3120.75
+        ]
+      ]
+    },
+    "bounding_box": {
+      "min_mm": [
+        -4.9,
+        -4.9,
+        0.1
+      ],
+      "max_mm": [
+        105.1,
+        55.1,
+        20.1
+      ],
+      "size_mm": [
+        110.0,
+        60.0,
+        20.0
+      ]
+    },
+    "bodies": [
+      {
+        "name": "叉形接头-1",
+        "type": "solid",
+        "faces": 42,
+        "edges": 96,
+        "vertices": 56,
+        "volume_mm3": 125000.0,
+        "area_mm2": 24800.0,
+        "closed": true,
+        "bbox": {
+          "min_mm": [
+            -5.0,
+            -5.0,
+            0.0
+          ],
+          "max_mm": [
+            105.0,
+            55.0,
+            20.0
+          ],
+          "size_mm": [
+            110.0,
+            60.0,
+            20.0
+          ]
+        }
+      }
+    ],
+    "features": [
+      {
+        "name": "Base-Extrude",
+        "type": "Extrude",
+        "suppressed": false
+      },
+      {
+        "name": "Cut-Extrude1",
+        "type": "Extrude",
+        "suppressed": false
+      },
+      {
+        "name": "Hole1",
+        "type": "HoleWizard",
+        "suppressed": false
+      },
+      {
+        "name": "Fillet1",
+        "type": "Fillet",
+        "suppressed": false
+      },
+      {
+        "name": "Chamfer1",
+        "type": "Chamfer",
+        "suppressed": false
+      },
+      {
+        "name": "Mirror1",
+        "type": "Mirror",
+        "suppressed": false
+      }
+    ],
+    "sketches": [
+      {
+        "name": "Sketch1",
+        "plane": "Front",
+        "entities": 12,
+        "dimensions": {
+          "length_mm": 110.0,
+          "width_mm": 60.0
+        }
+      },
+      {
+        "name": "Sketch2",
+        "plane": "Top",
+        "entities": 8,
+        "dimensions": {
+          "diameter_mm": 10.0
+        }
+      }
+    ],
+    "geometry_digest": {
+      "plane": [
+        {
+          "kind": "plane",
+          "area_mm2": 826.67
+        },
+        {
+          "kind": "plane",
+          "area_mm2": 826.67
+        },
+        {
+          "kind": "plane",
+          "area_mm2": 826.67
+        },
+        {
+          "kind": "plane",
+          "area_mm2": 826.67
+        },
+        {
+          "kind": "plane",
+          "area_mm2": 826.67
+        },
+        {
+          "kind": "plane",
+          "area_mm2": 826.67
+        },
+        {
+          "kind": "plane",
+          "area_mm2": 826.67
+        },
+        {
+          "kind": "plane",
+          "area_mm2": 826.67
+        },
+        {
+          "kind": "plane",
+          "area_mm2": 826.67
+        },
+        {
+          "kind": "plane",
+          "area_mm2": 826.67
+        },
+        {
+          "kind": "plane",
+          "area_mm2": 826.67
+        },
+        {
+          "kind": "plane",
+          "area_mm2": 826.67
+        }
+      ],
+      "cylinder": [
+        {
+          "kind": "cylinder",
+          "radius_mm": 5.0,
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "area_mm2": 314.16
+        },
+        {
+          "kind": "cylinder",
+          "radius_mm": 5.0,
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "area_mm2": 314.16
+        },
+        {
+          "kind": "cylinder",
+          "radius_mm": 5.0,
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "area_mm2": 314.16
+        },
+        {
+          "kind": "cylinder",
+          "radius_mm": 5.0,
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "area_mm2": 314.16
+        },
+        {
+          "kind": "cylinder",
+          "radius_mm": 5.0,
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "area_mm2": 314.16
+        },
+        {
+          "kind": "cylinder",
+          "radius_mm": 5.0,
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "area_mm2": 314.16
+        },
+        {
+          "kind": "cylinder",
+          "radius_mm": 5.0,
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "area_mm2": 314.16
+        },
+        {
+          "kind": "cylinder",
+          "radius_mm": 5.0,
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "area_mm2": 314.16
+        }
+      ],
+      "cone": [],
+      "sphere": [],
+      "torus": [],
+      "other": []
+    },
+    "custom_properties": {
+      "Material": "Steel AISI 1045",
+      "PartNumber": "BRK-001"
+    },
+    "configurations": [
+      {
+        "name": "Default",
+        "active": true
+      }
+    ],
+    "drawing": null,
+    "assembly": null
+  },
+  "diagnostics": {
+    "warnings": [
+      "NX import: healed 1 edge tolerance on body 叉形接头-1"
+    ],
+    "limits": [
+      "NX journal: PMI/annotations not read"
+    ],
+    "duration_s": 4.02,
+    "driver": {
+      "import_format": "step",
+      "step_variant": "ap242"
+    }
+  }
+}

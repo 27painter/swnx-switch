@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# run artefacts: keep the repo clean, they are reproducible
+work/
+out/
+*.log
+
+# locally extracted test tooling / scratch dirs (see scripts/run_tests.py)
+.tools/
+.tmp/
+.wheels/
+.pytest_cache/
+tests/tmp-*
+tests/.tmp*
+
+# OS
+Thumbs.db
+desktop.ini
+pytest-cache-files-*
+

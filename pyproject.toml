@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "swnx-switch"
+version = "0.1.0"
+description = "Read SolidWorks .sldprt and Siemens NX .prt into an AI-readable neutral model, and convert between them with tolerance-verified STEP/Parasolid interchange."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "27painter" }]
+keywords = ["cad", "solidworks", "siemens-nx", "nxopen", "step", "parasolid", "mcp", "ai-agent"]
+classifiers = [
+  "Environment :: Win32 (MS Windows)",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering",
+]
+dependencies = []
+
+[project.optional-dependencies]
+windows = ["pywin32>=305"]
+test = ["pytest>=7"]
+
+[project.scripts]
+swnx-switch = "swnx_switch.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# no cacheprovider: the DSH file sandbox denies deleting pytest's cache dir, and
+# a test run should not print permission warnings when the tests all pass.
+addopts = "-q -p no:cacheprovider"
+# Leftover sandbox-denied scratch dirs live under tests/ and cannot be removed in
+# a restricted session; keep collection away from them.
+norecursedirs = ["tmp-*", ".tmp*", "__pycache__"]

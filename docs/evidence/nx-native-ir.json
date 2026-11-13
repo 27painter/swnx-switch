@@ -1,0 +1,302 @@
+{
+  "schema": "swnx.ir/1",
+  "generated_at": "2026-11-13T18:40:44+08:00",
+  "generator": {
+    "name": "swnx-switch",
+    "version": "0.1.0",
+    "backend": "nx"
+  },
+  "source": {
+    "path": "D:\\27painter\\Documents\\nx_sw_test\\probe_part.prt",
+    "format": "prt",
+    "size_bytes": 89697,
+    "sha256": "eafb49605eda2f53c3a5a5e4fd8fdc719f557d2a09341b8babc23babc6546b2e",
+    "app": "Siemens NX",
+    "app_version": "2406",
+    "readonly": true,
+    "notes": []
+  },
+  "model": {
+    "name": "probe_part",
+    "kind": "part",
+    "units": "mm",
+    "material": {
+      "density_kg_m3": 7830.639999999999
+    },
+    "mass_properties": {
+      "volume_mm3": 41716.81469282041,
+      "surface_area_mm2": 9428.318530717957,
+      "mass_kg": 0.3266693578061872,
+      "centroid_mm": [
+        0.0,
+        0.0,
+        10.0
+      ]
+    },
+    "bounding_box": {
+      "min_mm": [
+        -30.0,
+        -20.0,
+        0.0
+      ],
+      "max_mm": [
+        30.0,
+        20.0,
+        20.0
+      ],
+      "size_mm": [
+        60.0,
+        40.0,
+        20.0
+      ]
+    },
+    "bodies": [
+      {
+        "name": "BLOCK(1)",
+        "type": "solid",
+        "faces": 7,
+        "edges": 14,
+        "volume_mm3": 41716.81469282041,
+        "area_mm2": 9428.318530717957,
+        "closed": true,
+        "bbox": {
+          "min_mm": [
+            -30.0,
+            -20.0,
+            0.0
+          ],
+          "max_mm": [
+            30.0,
+            20.0,
+            20.0
+          ],
+          "size_mm": [
+            60.0,
+            40.0,
+            20.0
+          ]
+        }
+      }
+    ],
+    "features": [
+      {
+        "name": "Datum Coordinate System(0)",
+        "type": "DATUM_CSYS",
+        "suppressed": false,
+        "parameters": {
+          "timestamp": 0
+        }
+      },
+      {
+        "name": "Block(1)",
+        "type": "BLOCK",
+        "suppressed": false,
+        "children": [
+          "Simple Hole(2)"
+        ],
+        "parameters": {
+          "timestamp": 1
+        }
+      },
+      {
+        "name": "Simple Hole(2)",
+        "type": "SIMPLE HOLE",
+        "suppressed": false,
+        "parent": "Block(1)",
+        "parameters": {
+          "timestamp": 2
+        }
+      }
+    ],
+    "sketches": [],
+    "geometry_digest": {
+      "plane": [
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39433
+          ],
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "normal": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "origin_mm": [
+            0.0,
+            0.0,
+            20.0
+          ],
+          "area_mm2": 2085.8407
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39429
+          ],
+          "axis": [
+            -1.0,
+            -0.0,
+            0.0
+          ],
+          "normal": [
+            -1.0,
+            -0.0,
+            0.0
+          ],
+          "origin_mm": [
+            -30.0,
+            0.0,
+            10.0
+          ],
+          "area_mm2": 800.0
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39425
+          ],
+          "axis": [
+            0.0,
+            -1.0,
+            -0.0
+          ],
+          "normal": [
+            0.0,
+            -1.0,
+            -0.0
+          ],
+          "origin_mm": [
+            0.0,
+            -20.0,
+            10.0
+          ],
+          "area_mm2": 1200.0
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39430
+          ],
+          "axis": [
+            1.0,
+            0.0,
+            -0.0
+          ],
+          "normal": [
+            1.0,
+            0.0,
+            -0.0
+          ],
+          "origin_mm": [
+            30.0,
+            0.0,
+            10.0
+          ],
+          "area_mm2": 800.0
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39431
+          ],
+          "axis": [
+            -0.0,
+            -0.0,
+            -1.0
+          ],
+          "normal": [
+            -0.0,
+            -0.0,
+            -1.0
+          ],
+          "origin_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "area_mm2": 2085.8407
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39432
+          ],
+          "axis": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "normal": [
+            -0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            0.0,
+            20.0,
+            10.0
+          ],
+          "area_mm2": 1200.0
+        }
+      ],
+      "cylinder": [
+        {
+          "kind": "cylinder",
+          "count": 1,
+          "face_tags": [
+            39428
+          ],
+          "radius_mm": 10.0,
+          "axis": [
+            0.0,
+            0.0,
+            1.0
+          ],
+          "origin_mm": [
+            0.0,
+            0.0,
+            10.0
+          ],
+          "area_mm2": 1256.6371
+        }
+      ],
+      "cone": [],
+      "sphere": [],
+      "torus": [],
+      "other": []
+    },
+    "custom_properties": {},
+    "configurations": [],
+    "drawing": null,
+    "assembly": null
+  },
+  "diagnostics": {
+    "warnings": [],
+    "limits": [
+      "NX configurations / part families are not exposed by NXOpen BasePart; not extracted",
+      "moments of inertia are not exposed by MeasureBodies; not extracted"
+    ],
+    "duration_s": 0.474,
+    "driver": {
+      "part_units": "1",
+      "mm_per_unit": 1.0,
+      "open_status": "<NXOpen.PartLoadStatus object at 0x00000191190C2FF0>",
+      "system_attributes_skipped": 4,
+      "journal": "D:\\27painter\\Documents\\swnx-switch\\tools\\nx\\driver.py",
+      "driver_version": "1",
+      "python": "3.10.12",
+      "nx_release": "2406"
+    }
+  }
+}

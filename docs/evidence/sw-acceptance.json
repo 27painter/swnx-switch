@@ -1,0 +1,440 @@
+{
+  "generated_at": "2026-11-13T18:47:06",
+  "command": "work\\sw\\acceptance.py",
+  "repo": "D:\\27painter\\Documents\\swnx-switch",
+  "python": "C:\\Users\\27painter\\AppData\\Local\\Programs\\Python\\Python312\\python.exe",
+  "part": "D:\\27painter\\Documents\\sw_job\\build_final\\叉形接头.SLDPRT",
+  "second_step": "D:\\27painter\\Documents\\sw_job\\tooltest\\skilltest_bracket.STEP",
+  "steps": [
+    {
+      "label": "1 probe SolidWorks build",
+      "token": "PROBE_OK",
+      "optional": false,
+      "job": {
+        "kind": "probe",
+        "input": null,
+        "output": null,
+        "format": null,
+        "options": {}
+      },
+      "started_at": "2026-11-13T18:46:11",
+      "ok": true,
+      "duration_s": 5.22,
+      "log": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\jobs\\log-probe-55da41a2.txt",
+      "outputs": [],
+      "warnings": [],
+      "error": null,
+      "exit_code": 0,
+      "probe": {
+        "revision": "33.5.0",
+        "build_numbers": null,
+        "build_numbers_read": {
+          "api": null,
+          "values": null,
+          "return": null,
+          "error": "GetBuildNumbers: com_error: (-2147352571, '类型不匹配。', None, 1)"
+        },
+        "year": 2025,
+        "app_label": "SolidWorks 2025",
+        "executable_path": "D:\\Program Files\\SOLIDWORKS Corp\\SOLIDWORKS\\SLDWORKS.exe",
+        "executable_file_version": "33.5.0.53",
+        "install_root": "D:\\Program Files\\SOLIDWORKS Corp\\SOLIDWORKS",
+        "process_id": 35412,
+        "connected_via": "launch",
+        "process_owned": true,
+        "3d_interconnect_enabled": true,
+        "step_ap": {
+          "preference_id": 75,
+          "value": 203,
+          "schema": "ap203"
+        },
+        "default_templates": {
+          "part": "C:\\ProgramData\\SOLIDWORKS\\SOLIDWORKS 2025\\templates\\gb_part.prtdot",
+          "assembly": "C:\\ProgramData\\SOLIDWORKS\\SOLIDWORKS 2025\\templates\\gb_assembly.asmdot",
+          "drawing": "D:\\Program Files\\SOLIDWORKS Corp\\SOLIDWORKS\\data\\templates\\ansi.drwdot"
+        },
+        "open_documents": [],
+        "translator_modules": {
+          "sldstepu.dll": true,
+          "sldxtkitu.dll": true,
+          "sldxtoolkitu.dll": true,
+          "sldigesu.dll": false
+        },
+        "capabilities": {
+          "step_translator_module": true,
+          "parasolid_module_candidates": [
+            "sldxtkitu.dll",
+            "sldxtoolkitu.dll"
+          ],
+          "iges_module": false,
+          "verified_by": "export/import jobs (file header + entity checks on disk)"
+        }
+      }
+    },
+    {
+      "label": "2 read native .sldprt to IR",
+      "token": "READ_OK",
+      "optional": false,
+      "job": {
+        "kind": "read",
+        "input": "D:\\27painter\\Documents\\sw_job\\build_final\\叉形接头.SLDPRT",
+        "output": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头.ir.json",
+        "format": null,
+        "options": {}
+      },
+      "started_at": "2026-11-13T18:46:16",
+      "ok": true,
+      "duration_s": 7.28,
+      "log": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\jobs\\log-read-30439242.txt",
+      "outputs": [
+        {
+          "path": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头.ir.json",
+          "exists": true,
+          "size_bytes": 21722,
+          "sha256": "1cf59ec47f7349ec37905cf6d28bd56f3bf415c8325ddc7a7a47e0babc8e8846"
+        }
+      ],
+      "warnings": [],
+      "error": null,
+      "exit_code": 0,
+      "ir_summary": {
+        "name": "叉形接头",
+        "kind": "part",
+        "units": "mm",
+        "source_format": "sldprt",
+        "bodies": 1,
+        "features": 45,
+        "volume_mm3": 461736.370946,
+        "surface_area_mm2": 87883.276607,
+        "mass_kg": 0.46173637094563097,
+        "bbox_size_mm": [
+          188.5,
+          80.0,
+          110.0
+        ],
+        "faces": 25,
+        "surfaces": {
+          "plane": 9,
+          "cylinder": 9,
+          "torus": 6
+        },
+        "warnings": []
+      }
+    },
+    {
+      "label": "3 export .sldprt -> STEP (AP242)",
+      "token": "STEP_EXPORTED",
+      "optional": false,
+      "job": {
+        "kind": "export",
+        "input": "D:\\27painter\\Documents\\sw_job\\build_final\\叉形接头.SLDPRT",
+        "output": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头.step",
+        "format": "step",
+        "options": {
+          "step_ap": "ap242"
+        }
+      },
+      "started_at": "2026-11-13T18:46:23",
+      "ok": true,
+      "duration_s": 7.03,
+      "log": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\jobs\\log-export-20bbdd29.txt",
+      "outputs": [
+        {
+          "path": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头.step",
+          "exists": true,
+          "size_bytes": 86554,
+          "sha256": "1af977bf84c77736b9f7942aa40dc3a65001fdf712043f903d23efc399cbc612"
+        }
+      ],
+      "warnings": [],
+      "error": null,
+      "exit_code": 0,
+      "export": {
+        "target": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头.step",
+        "format": "step",
+        "duration_s": 5.312,
+        "step_ap_preference": {
+          "requested": "ap242",
+          "achieved": "ap203",
+          "matched": false,
+          "schema": "CONFIG_CONTROL_DESIGN",
+          "validated": true,
+          "prior": {
+            "swStepAP": 203,
+            "swStepExportPreference": 0
+          },
+          "attempts": [
+            {
+              "preference": "swStepAP",
+              "preference_id": 75,
+              "value": 242,
+              "readback": 242,
+              "path": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头.step",
+              "schema": "CONFIG_CONTROL_DESIGN",
+              "step_ap": "ap203",
+              "size_bytes": 86554,
+              "valid": true,
+              "validation_error": null,
+              "save_as_errors": 0,
+              "save_as_warnings": 0
+            }
+          ]
+        },
+        "size_bytes": 86554,
+        "schema": "CONFIG_CONTROL_DESIGN",
+        "step_ap": "AP203",
+        "has_advanced_face": true,
+        "header_application": "'²æÐÎ½ÓÍ·.step',\r     '2026-11-13T10:46:28',\r     ( '' ),\r     ( '' ),\r     'SwSTEP 2.0',\r     'SolidWorks 2025',\r     ''"
+      }
+    },
+    {
+      "label": "4 export .sldprt -> Parasolid .x_t (optional)",
+      "token": "PARASOLID_EXPORTED",
+      "optional": true,
+      "job": {
+        "kind": "export",
+        "input": "D:\\27painter\\Documents\\sw_job\\build_final\\叉形接头.SLDPRT",
+        "output": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头.x_t",
+        "format": "parasolid",
+        "options": {}
+      },
+      "started_at": "2026-11-13T18:46:30",
+      "ok": true,
+      "duration_s": 6.6,
+      "log": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\jobs\\log-export-b5af3e5f.txt",
+      "outputs": [
+        {
+          "path": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头.x_t",
+          "exists": true,
+          "size_bytes": 23487,
+          "sha256": "e4f3565621feb5120d1d0d9cf480b758a5abec7d730585d09fa4ad6771d85ea2"
+        }
+      ],
+      "warnings": [],
+      "error": null,
+      "exit_code": 0,
+      "export": {
+        "target": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头.x_t",
+        "format": "parasolid",
+        "duration_s": 4.828,
+        "save_as_errors": 0,
+        "save_as_warnings": 0,
+        "size_bytes": 23487,
+        "has_transmit_file": true,
+        "header": "**ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz**************************\r **PARASOLID !\"#$%&'()*+,-./:;<=>?@[\\]^"
+      }
+    },
+    {
+      "label": "5 import exported STEP -> new .sldprt",
+      "token": "STEP_IMPORTED",
+      "optional": false,
+      "job": {
+        "kind": "import",
+        "input": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头.step",
+        "output": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头_from_step.sldprt",
+        "format": "sldprt",
+        "options": {}
+      },
+      "started_at": "2026-11-13T18:46:37",
+      "ok": true,
+      "duration_s": 7.49,
+      "log": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\jobs\\log-import-d5594413.txt",
+      "outputs": [
+        {
+          "path": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头_from_step.SLDPRT",
+          "exists": true,
+          "size_bytes": 158262,
+          "sha256": "6ef38ad5f161a27e6ff41ce90cc356cb46399a9914f9eb02a807623f6e293aa4"
+        }
+      ],
+      "warnings": [],
+      "error": null,
+      "exit_code": 0,
+      "import": {
+        "source": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头.step",
+        "target": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头_from_step.SLDPRT",
+        "size_bytes": 158262,
+        "bodies": 1,
+        "bodies_api": "GetBodies2(swAllBodies=-1, False)",
+        "summary": {
+          "name": "叉形接头_from_step",
+          "kind": "part",
+          "units": "mm",
+          "source_format": "step",
+          "bodies": 1,
+          "features": 28,
+          "volume_mm3": 461736.370946,
+          "surface_area_mm2": 87883.276607,
+          "mass_kg": 0.46173637094563114,
+          "bbox_size_mm": [
+            188.5,
+            80.0,
+            110.0
+          ],
+          "faces": 25,
+          "surfaces": {},
+          "warnings": []
+        },
+        "duration_s": 6.0
+      }
+    },
+    {
+      "label": "6 read re-imported .sldprt to IR",
+      "token": "REIMPORT_READ_OK",
+      "optional": false,
+      "job": {
+        "kind": "read",
+        "input": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头_from_step.sldprt",
+        "output": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头_from_step.ir.json",
+        "format": null,
+        "options": {}
+      },
+      "started_at": "2026-11-13T18:46:44",
+      "ok": true,
+      "duration_s": 7.72,
+      "log": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\jobs\\log-read-f9b75837.txt",
+      "outputs": [
+        {
+          "path": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\叉形接头_from_step.ir.json",
+          "exists": true,
+          "size_bytes": 17238,
+          "sha256": "3db43a0a8579dee6977c27db3c8ea51b785325903379a8f31fd79f30b7720b4b"
+        }
+      ],
+      "warnings": [],
+      "error": null,
+      "exit_code": 0,
+      "ir_summary": {
+        "name": "叉形接头_from_step",
+        "kind": "part",
+        "units": "mm",
+        "source_format": "sldprt",
+        "bodies": 1,
+        "features": 28,
+        "volume_mm3": 461736.370946,
+        "surface_area_mm2": 87883.276607,
+        "mass_kg": 0.46173637094563114,
+        "bbox_size_mm": [
+          188.5,
+          80.0,
+          110.0
+        ],
+        "faces": 25,
+        "surfaces": {
+          "plane": 9,
+          "cylinder": 9,
+          "torus": 6
+        },
+        "warnings": []
+      },
+      "volume_roundtrip": {
+        "original_mm3": 461736.370946,
+        "reimported_mm3": 461736.370946,
+        "relative_deviation": 0.0
+      }
+    },
+    {
+      "label": "7 import foreign (NX-produced) STEP -> .sldprt",
+      "token": "NXSTEP_IMPORTED",
+      "optional": false,
+      "job": {
+        "kind": "import",
+        "input": "D:\\27painter\\Documents\\sw_job\\tooltest\\skilltest_bracket.STEP",
+        "output": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\skilltest_bracket_imported.sldprt",
+        "format": "sldprt",
+        "options": {}
+      },
+      "started_at": "2026-11-13T18:46:52",
+      "ok": true,
+      "duration_s": 7.38,
+      "log": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\jobs\\log-import-affe989b.txt",
+      "outputs": [
+        {
+          "path": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\skilltest_bracket_imported.SLDPRT",
+          "exists": true,
+          "size_bytes": 80970,
+          "sha256": "4ac9bfcf9234b95225482070ee3c77f45378b55d3ab60a59be1b97c57ffdad86"
+        }
+      ],
+      "warnings": [],
+      "error": null,
+      "exit_code": 0,
+      "import": {
+        "source": "D:\\27painter\\Documents\\sw_job\\tooltest\\skilltest_bracket.STEP",
+        "target": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\skilltest_bracket_imported.SLDPRT",
+        "size_bytes": 80970,
+        "bodies": 1,
+        "bodies_api": "GetBodies2(swAllBodies=-1, False)",
+        "summary": {
+          "name": "skilltest_bracket_imported",
+          "kind": "part",
+          "units": "mm",
+          "source_format": "step",
+          "bodies": 1,
+          "features": 28,
+          "volume_mm3": 47500.880922,
+          "surface_area_mm2": 10027.96375,
+          "mass_kg": 0.04750088092227766,
+          "bbox_size_mm": [
+            60.0,
+            60.0,
+            20.0
+          ],
+          "faces": 4,
+          "surfaces": {},
+          "warnings": []
+        },
+        "duration_s": 5.907
+      }
+    },
+    {
+      "label": "8 read NX-STEP-imported .sldprt to IR",
+      "token": "NXSTEP_READ_OK",
+      "optional": false,
+      "job": {
+        "kind": "read",
+        "input": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\skilltest_bracket_imported.sldprt",
+        "output": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\skilltest_bracket_imported.ir.json",
+        "format": null,
+        "options": {}
+      },
+      "started_at": "2026-11-13T18:46:59",
+      "ok": true,
+      "duration_s": 7.0,
+      "log": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\jobs\\log-read-1fcc9ab7.txt",
+      "outputs": [
+        {
+          "path": "D:\\27painter\\Documents\\swnx-switch\\work\\sw\\out\\skilltest_bracket_imported.ir.json",
+          "exists": true,
+          "size_bytes": 11153,
+          "sha256": "94163e27a6a042f8ac1398e4832f4eea5942d38e7281b74e279ace3e803d866c"
+        }
+      ],
+      "warnings": [],
+      "error": null,
+      "exit_code": 0,
+      "ir_summary": {
+        "name": "skilltest_bracket_imported",
+        "kind": "part",
+        "units": "mm",
+        "source_format": "sldprt",
+        "bodies": 1,
+        "features": 28,
+        "volume_mm3": 47500.880922,
+        "surface_area_mm2": 10027.96375,
+        "mass_kg": 0.04750088092227766,
+        "bbox_size_mm": [
+          60.0,
+          60.0,
+          20.0
+        ],
+        "faces": 4,
+        "surfaces": {
+          "plane": 3,
+          "cylinder": 3
+        },
+        "warnings": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "name": "swnx-switch",
+  "version": "0.1.0",
+  "description": "DSH plugin: registers swnx-switch as an MCP server so an agent can read SolidWorks/NX parts and convert between them with tolerance-verified STEP/Parasolid interchange.",
+  "license": "MIT",
+  "author": "27painter",
+  "type": "module",
+  "main": "lib/index.js",
+  "bin": {
+    "swnx-switch": "bin/swnx-switch.mjs"
+  },
+  "files": [
+    "lib/",
+    "bin/",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "mcp",
+    "solidworks",
+    "siemens-nx",
+    "cad",
+    "step",
+    "parasolid",
+    "ai-agent"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "os": [
+    "win32"
+  ],
+  "peerDependencies": {
+    "@deepseek-ai/dsh-mcp-client": ">=0.2.0-rc.1 <0.3.0-0"
+  }
+}

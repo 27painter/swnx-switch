@@ -1,0 +1,649 @@
+{
+  "schema": "swnx.ir/1",
+  "generated_at": "2026-11-13T18:41:49+08:00",
+  "generator": {
+    "name": "swnx-switch",
+    "version": "0.1.0",
+    "backend": "nx"
+  },
+  "source": {
+    "path": "D:\\27painter\\Documents\\swnx-switch\\work\\nx\\out\\imported-parasolid.prt",
+    "format": "prt",
+    "size_bytes": 106658,
+    "sha256": "4bc27be338fb5c412ecfac701fa8936f1bb89318d415634fbc676a942037d8fa",
+    "app": "Siemens NX",
+    "app_version": "2406",
+    "readonly": true,
+    "notes": []
+  },
+  "model": {
+    "name": "imported-parasolid",
+    "kind": "part",
+    "units": "mm",
+    "material": {
+      "density_kg_m3": 999.9999999999999
+    },
+    "mass_properties": {
+      "volume_mm3": 461736.3709456309,
+      "surface_area_mm2": 87883.27660653113,
+      "mass_kg": 0.46173637094563086,
+      "centroid_mm": [
+        26.304407011,
+        -0.193963902,
+        -0.0
+      ]
+    },
+    "bounding_box": {
+      "min_mm": [
+        -55.0,
+        -40.0,
+        -55.0
+      ],
+      "max_mm": [
+        133.5,
+        40.0,
+        55.0
+      ],
+      "size_mm": [
+        188.5,
+        80.0,
+        110.0
+      ]
+    },
+    "bodies": [
+      {
+        "name": "UNPARAMETERIZED_FEATURE(1)",
+        "type": "solid",
+        "faces": 25,
+        "edges": 45,
+        "volume_mm3": 461736.37094563094,
+        "area_mm2": 87883.27660653113,
+        "closed": true,
+        "bbox": {
+          "min_mm": [
+            -55.0,
+            -40.0,
+            -55.0
+          ],
+          "max_mm": [
+            133.5,
+            40.0,
+            55.0
+          ],
+          "size_mm": [
+            188.5,
+            80.0,
+            110.0
+          ]
+        }
+      }
+    ],
+    "features": [
+      {
+        "name": "Datum Coordinate System(0)",
+        "type": "DATUM_CSYS",
+        "suppressed": false,
+        "parameters": {
+          "timestamp": 0
+        }
+      },
+      {
+        "name": "Body(1)",
+        "type": "BREP",
+        "suppressed": false,
+        "parameters": {
+          "timestamp": 1
+        }
+      }
+    ],
+    "sketches": [],
+    "geometry_digest": {
+      "plane": [
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39673
+          ],
+          "axis": [
+            0.259433962,
+            0.0,
+            -0.96576085
+          ],
+          "normal": [
+            0.259433962,
+            0.0,
+            -0.96576085
+          ],
+          "origin_mm": [
+            63.702,
+            33.5,
+            -39.838
+          ],
+          "area_mm2": 307.112
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39681
+          ],
+          "axis": [
+            0.259433962,
+            0.0,
+            0.96576085
+          ],
+          "normal": [
+            0.259433962,
+            0.0,
+            0.96576085
+          ],
+          "origin_mm": [
+            63.702,
+            33.5,
+            39.838
+          ],
+          "area_mm2": 307.112
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39675
+          ],
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "normal": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            39.25,
+            -27.0,
+            0.0
+          ],
+          "area_mm2": 6655.3335
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39667
+          ],
+          "axis": [
+            -0.0,
+            -1.0,
+            -0.0
+          ],
+          "normal": [
+            -0.0,
+            -1.0,
+            -0.0
+          ],
+          "origin_mm": [
+            39.25,
+            -35.0,
+            0.0
+          ],
+          "area_mm2": 8304.6696
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39669
+          ],
+          "axis": [
+            0.259433962,
+            0.0,
+            -0.96576085
+          ],
+          "normal": [
+            0.259433962,
+            0.0,
+            -0.96576085
+          ],
+          "origin_mm": [
+            63.702,
+            -31.0,
+            -39.838
+          ],
+          "area_mm2": 818.9652
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39684
+          ],
+          "axis": [
+            0.259433962,
+            0.0,
+            0.96576085
+          ],
+          "normal": [
+            0.259433962,
+            0.0,
+            0.96576085
+          ],
+          "origin_mm": [
+            63.702,
+            -31.0,
+            39.838
+          ],
+          "area_mm2": 818.9652
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39668
+          ],
+          "axis": [
+            -0.0,
+            -1.0,
+            -0.0
+          ],
+          "normal": [
+            -0.0,
+            -1.0,
+            -0.0
+          ],
+          "origin_mm": [
+            0.0,
+            -40.0,
+            0.0
+          ],
+          "area_mm2": 2199.1149
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39678
+          ],
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "normal": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            0.0,
+            40.0,
+            0.0
+          ],
+          "area_mm2": 2199.1149
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39662
+          ],
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "normal": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            39.25,
+            35.0,
+            0.0
+          ],
+          "area_mm2": 8304.6696
+        },
+        {
+          "kind": "plane",
+          "count": 1,
+          "face_tags": [
+            39663
+          ],
+          "axis": [
+            -0.0,
+            -1.0,
+            -0.0
+          ],
+          "normal": [
+            -0.0,
+            -1.0,
+            -0.0
+          ],
+          "origin_mm": [
+            39.25,
+            27.0,
+            0.0
+          ],
+          "area_mm2": 5048.9483
+        }
+      ],
+      "cylinder": [
+        {
+          "kind": "cylinder",
+          "count": 1,
+          "face_tags": [
+            39683
+          ],
+          "radius_mm": 30.0,
+          "axis": [
+            -0.0,
+            -1.0,
+            -0.0
+          ],
+          "origin_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "area_mm2": 15079.6447
+        },
+        {
+          "kind": "cylinder",
+          "count": 1,
+          "face_tags": [
+            39680
+          ],
+          "radius_mm": 5.0,
+          "axis": [
+            0.96576085,
+            0.0,
+            0.259433962
+          ],
+          "origin_mm": [
+            62.404,
+            32.0,
+            -35.009
+          ],
+          "area_mm2": 804.0172
+        },
+        {
+          "kind": "cylinder",
+          "count": 1,
+          "face_tags": [
+            39677
+          ],
+          "radius_mm": 27.5,
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            106.0,
+            -31.0,
+            0.0
+          ],
+          "area_mm2": 575.6785
+        },
+        {
+          "kind": "cylinder",
+          "count": 1,
+          "face_tags": [
+            39665
+          ],
+          "radius_mm": 27.5,
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            106.0,
+            33.5,
+            0.0
+          ],
+          "area_mm2": 215.8794
+        },
+        {
+          "kind": "cylinder",
+          "count": 1,
+          "face_tags": [
+            39671
+          ],
+          "radius_mm": 45.0,
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "area_mm2": 15268.1403
+        },
+        {
+          "kind": "cylinder",
+          "count": 1,
+          "face_tags": [
+            39685
+          ],
+          "radius_mm": 55.0,
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            0.0,
+            -31.0,
+            0.0
+          ],
+          "area_mm2": 1613.2445
+        },
+        {
+          "kind": "cylinder",
+          "count": 1,
+          "face_tags": [
+            39682
+          ],
+          "radius_mm": 55.0,
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            0.0,
+            33.5,
+            0.0
+          ],
+          "area_mm2": 604.9667
+        },
+        {
+          "kind": "cylinder",
+          "count": 1,
+          "face_tags": [
+            39679
+          ],
+          "radius_mm": 5.0,
+          "axis": [
+            -0.96576085,
+            0.0,
+            0.259433962
+          ],
+          "origin_mm": [
+            62.404,
+            32.0,
+            35.009
+          ],
+          "area_mm2": 804.0172
+        },
+        {
+          "kind": "cylinder",
+          "count": 1,
+          "face_tags": [
+            39666
+          ],
+          "radius_mm": 10.0,
+          "axis": [
+            -0.0,
+            -1.0,
+            -0.0
+          ],
+          "origin_mm": [
+            106.0,
+            0.0,
+            0.0
+          ],
+          "area_mm2": 4398.2297
+        },
+        {
+          "kind": "cylinder",
+          "count": 1,
+          "face_tags": [
+            39676
+          ],
+          "radius_mm": 20.0,
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            106.0,
+            2.5,
+            0.0
+          ],
+          "area_mm2": 6157.5216
+        }
+      ],
+      "cone": [],
+      "sphere": [],
+      "torus": [
+        {
+          "kind": "torus",
+          "count": 1,
+          "face_tags": [
+            39670
+          ],
+          "radius_mm": 40.0,
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            0.0,
+            -37.5,
+            0.0
+          ],
+          "area_mm2": 2131.0005
+        },
+        {
+          "kind": "torus",
+          "count": 1,
+          "face_tags": [
+            39664
+          ],
+          "radius_mm": 50.0,
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            0.0,
+            29.5,
+            0.0
+          ],
+          "area_mm2": 1531.479
+        },
+        {
+          "kind": "torus",
+          "count": 1,
+          "face_tags": [
+            39674
+          ],
+          "radius_mm": 40.0,
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            0.0,
+            37.5,
+            0.0
+          ],
+          "area_mm2": 2131.0005
+        },
+        {
+          "kind": "torus",
+          "count": 1,
+          "face_tags": [
+            39672
+          ],
+          "radius_mm": 22.5,
+          "axis": [
+            0.0,
+            1.0,
+            0.0
+          ],
+          "origin_mm": [
+            106.0,
+            29.5,
+            0.0
+          ],
+          "area_mm2": 527.8307
+        },
+        {
+          "kind": "torus",
+          "count": 1,
+          "face_tags": [
+            39686
+          ],
+          "radius_mm": 25.0,
+          "axis": [
+            -0.0,
+            -1.0,
+            -0.0
+          ],
+          "origin_mm": [
+            106.0,
+            -24.5,
+            0.0
+          ],
+          "area_mm2": 1076.6209
+        }
+      ],
+      "other": []
+    },
+    "custom_properties": {},
+    "configurations": [],
+    "drawing": null,
+    "assembly": null
+  },
+  "diagnostics": {
+    "warnings": [],
+    "limits": [
+      "NX configurations / part families are not exposed by NXOpen BasePart; not extracted",
+      "moments of inertia are not exposed by MeasureBodies; not extracted"
+    ],
+    "duration_s": 0.359,
+    "driver": {
+      "part_units": "1",
+      "mm_per_unit": 1.0,
+      "open_status": "<NXOpen.PartLoadStatus object at 0x000001BED2E82FF0>",
+      "system_attributes_skipped": 4,
+      "journal": "D:\\27painter\\Documents\\swnx-switch\\tools\\nx\\driver.py",
+      "driver_version": "1",
+      "python": "3.10.12",
+      "nx_release": "2406"
+    }
+  }
+}

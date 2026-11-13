@@ -1,0 +1,17 @@
+# swnx-switch bundle patch.
+#
+# One row: this package itself. It is a real cordis plugin (lib/index.js), not a
+# wrapper around a binary, so dsh imports it by name from the profile.
+#
+# On load the plugin locates the swnx-switch project (SWNX_SWITCH_HOME, or the
+# default checkout), verifies that the Python package is importable, and
+# registers one @deepseek-ai/dsh-mcp-client row:
+#
+#   swnx-switch -> python -m swnx_switch.ai.mcp_server (stdio, 30 min tool timeout)
+#
+# If the project or its Python cannot be found the plugin throws with an
+# actionable message instead of registering a row that would fail silently.
+
+- insert:
+    - id: swnx-switch
+      name: 'swnx-switch'
