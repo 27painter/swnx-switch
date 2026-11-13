@@ -1,71 +1,74 @@
 # swnx-switch
 
-**中文 | [English](README.en.md)**
+**[中文](README.zh.md) | English**
 
-**SolidWorks `.sldprt` ⇄ Siemens NX `.prt` 零件互通：把零件读成 AI 能理解的结构，再做带容差校验的双向格式转换。**
+**SolidWorks `.sldprt` ⇄ Siemens NX `.prt` interoperability: read a part into a structure an AI can reason about, then convert between the two native formats with tolerance-verified validation.**
 
 
-本项目调用本机已安装的 **SolidWorks 2025** 与 **Siemens NX 2406** 的官方 API（COM / NXOpen），
-把零件读成中立的 JSON 模型，再通过 **Parasolid `.x_t`（首选）/ STEP（备选）** 在两种原生格式间互转，
-**每次转换都自动对比源件与结果并给出 `pass` / `warn` / `fail` 结论**。
+The project drives the installed **SolidWorks 2025** and **Siemens NX 2406** through their own
+official APIs (COM / NXOpen), reads a part into a neutral JSON model, exchanges it through
+**Parasolid `.x_t` (preferred) or STEP (fallback)**, and **compares source vs. result after every
+conversion, returning a `pass` / `warn` / `fail` verdict**.
 
-> **边界声明（重要）**：本项目不解析闭源的 `.sldprt` / `.prt` 二进制结构，不做特征逆向。
-> 交换的是 **B-Rep 几何**（精确解析曲面，不是三角网格），因此**目标端得到的是无参数的实体/导入特征**，
-> 参数化特征树、草图、建模历史不会保留。这是 STEP/Parasolid 路线的行业上限，详见
-> [docs/limitations.md](docs/limitations.md)。
+> **Scope statement.** This project does not parse the closed `.sldprt` / `.prt` binary formats and
+> does no feature reverse-engineering. It exchanges **B-Rep geometry** (analytic surfaces, not
+> meshes), so **the target receives a dumb solid / imported body**: parametric features, sketches and
+> modelling history are not preserved. That is the industry ceiling for STEP/Parasolid exchange; see
+> [docs/limitations.md](docs/limitations.md).
 
 ---
 
-## 目录
+## Table of contents
 
-1. [这是什么 / 不是什么](#1-这是什么--不是什么)
-2. [环境要求](#2-环境要求)
-3. [安装与快速开始](#3-安装与快速开始)
-4. [命令行参考](#4-命令行参考)
-5. [AI 集成：MCP 与 skill](#5-ai-集成mcp-与-skill)
-6. [数据模型（IR）](#6-数据模型ir)
-7. [转换路线与原理](#7-转换路线与原理)
-8. [校验机制](#8-校验机制)
-9. [实测结果](#9-实测结果)
-10. [已知限制](#10-已知限制)
-11. [排错手册](#11-排错手册)
-12. [架构与目录](#12-架构与目录)
-13. [开发与测试](#13-开发与测试)
-14. [社区调研摘要](#14-社区调研摘要)
-15. [版本与路线图](#15-版本与路线图)
-16. [许可与合规](#16-许可与合规)
-17. [参考](#17-参考)
+1. [What it is / what it is not](#1-what-it-is--what-it-is-not)
+2. [Requirements](#2-requirements)
+3. [Install and quick start](#3-install-and-quick-start)
+4. [CLI reference](#4-cli-reference)
+5. [AI integration: MCP and skill](#5-ai-integration-mcp-and-skill)
+6. [Data model (IR)](#6-data-model-ir)
+7. [Conversion routes and rationale](#7-conversion-routes-and-rationale)
+8. [Validation](#8-validation)
+9. [Measured results](#9-measured-results)
+10. [Known limitations](#10-known-limitations)
+11. [Troubleshooting](#11-troubleshooting)
+12. [Architecture and layout](#12-architecture-and-layout)
+13. [Development and testing](#13-development-and-testing)
+14. [Community research summary](#14-community-research-summary)
+15. [Version and roadmap](#15-version-and-roadmap)
+16. [License and compliance](#16-license-and-compliance)
+17. [References](#17-references)
 
-## 1. 这是什么 / 不是什么
+## 1. What it is / what it is not
 
-| 能做 | 不能做 |
+| It can | It cannot |
 |---|---|
-| 读 `.sldprt` / `.prt` 的质量属性、包围盒、实体、特征树、草图、曲面摘要、自定义属性 | 不保留参数化特征树 / 草图 / 尺寸关系（目标端是导入实体） |
-| 在 `.sldprt` ⇄ `.prt` 之间转换，几何在 1e-9 量级一致 | 不做特征级"翻译"（Extrude→Extrude 这类重建） |
-| 读/导 `.step` / `.x_t`，把中间格式导入成原生件 | 不支持装配语义转换、工程图标注/PMI 的完整传递 |
-| 每次转换自动做 15 项容差校验并出中英文报告 | 不解析原生二进制格式、不绕过 CAD 许可证 |
-| 通过 MCP 给任意 AI 客户端提供 6 个工具 | 不是 GUI 软件（有双击菜单，但不是建模界面） |
+| Read mass properties, bounding box, bodies, feature tree, sketches, surface digest and custom properties from `.sldprt` / `.prt` | Preserve the parametric feature tree, sketches or dimension relations (the target gets an imported body) |
+| Convert `.sldprt` ⇄ `.prt` with geometry agreeing to ~1e-9 | Translate features (e.g. rebuild an Extrude as an Extrude) |
+| Import/export `.step` / `.x_t` and turn them into native parts | Convert assemblies semantically; carry full drawing annotations/PMI |
+| Run 15 tolerance checks and produce a bilingual report after every conversion | Parse native binary formats, bypass CAD licences, or work without the apps installed |
+| Expose 6 tools over MCP to any AI client | Act as a GUI modeller (it ships a double-click menu, not a CAD UI) |
 
-**设计取舍**：与其"猜特征"（不可靠、也无法验证），不如把 B-Rep 精确搬过去，并诚实报告丢了什么。
+**Design trade-off**: instead of guessing features (unreliable and unverifiable), move exact B-Rep and
+report honestly what was lost.
 
-## 2. 环境要求
+## 2. Requirements
 
-| 项 | 要求 | 本机实测 |
+| Item | Requirement | Verified machine |
 |---|---|---|
-| 操作系统 | Windows 10/11 x64 | Windows 11 x64 |
-| Python | 3.10+（宿主） | 3.12.10 |
-| pywin32 | SolidWorks 驱动必需 | 已安装 |
-| SolidWorks | 2020+（COM 自动化），实测 2025 | 2025 SP05（33.5.0.53） |
-| Siemens NX | 12 / 2406 / 2506（批处理 `run_journal.exe`），实测 2406 | 2406（`D:\UG NX2406`） |
-| 许可证 | 本机已授权可用的 SW / NX | 已验证 |
-| 磁盘 | 每次转换临时文件约 1–30 MB，`work/` 可随时清 | — |
+| OS | Windows 10/11 x64 | Windows 11 x64 |
+| Python | 3.10+ (host) | 3.12.10 |
+| pywin32 | Required by the SolidWorks driver | installed |
+| SolidWorks | 2020+ with COM automation; tested on 2025 | 2025 SP05 (33.5.0.53) |
+| Siemens NX | 12 / 2406 / 2506 (batch `run_journal.exe`); tested on 2406 | 2406 (`D:\UG NX2406`) |
+| Licence | A working SW / NX licence on the machine | verified |
+| Disk | 1–30 MB of temp files per conversion; `work/` is disposable | — |
 
-Python 侧**零第三方 CAD 依赖**（不需要 OCCT / pythonocc / FreeCAD）。测试可选 `pytest`，
-不装也能用 `scripts/run_tests.py` 跑全部 92 项测试。
+No third-party CAD library is required on the Python side (no OCCT / pythonocc / FreeCAD).
+`pytest` is optional: `scripts/run_tests.py` runs all 92 tests with plain Python.
 
-## 3. 安装与快速开始
+## 3. Install and quick start
 
-### 方式 A：直接用仓库（推荐）
+### Option A: run from the checkout (recommended)
 
 ```bat
 git clone <this repo> swnx-switch
@@ -73,123 +76,131 @@ cd swnx-switch
 swnx-switch.cmd probe
 ```
 
-### 方式 B：装成全局命令
+### Option B: install a global command
 
 ```bat
 python -m pip install -e ".[windows]"
-swnx-switch probe          :: 任意目录可用
+swnx-switch probe          :: available from any directory
 ```
 
-### 方式 C：DSH 插件（把工具交给 agent）
+### Option C: DSH plugin (hands the tools to an agent)
 
-按 [plugin/README.md](plugin/README.md) 把 `plugin/` 链接进 DSH profile 的依赖与 bundles，
-`pnpm install` 后重启 DSH，agent 即可调用 `swnx_convert_part` 等 6 个工具。
+Follow [plugin/README.md](plugin/README.md): link `plugin/` into the DSH profile dependencies and
+bundles, run `pnpm install`, restart DSH, and the agent can call `swnx_convert_part` and the other
+five tools.
 
-### 方式 D：Skill（告诉 AI 何时用、怎么判读）
+### Option D: skill (teaches the AI when to use it and how to read verdicts)
 
-[skills/swnx-switch/SKILL.md](skills/swnx-switch/SKILL.md) 是给 AI 的操作手册（工作流、结论判读、
-已知坑、失败处理、汇报模板）。装到 skill 目录即可被 DSH 按需加载：
+[skills/swnx-switch/SKILL.md](skills/swnx-switch/SKILL.md) is the operating manual (preflight,
+workflow, verdict interpretation, known traps, failure handling, reporting template). Copy it into
+the skill directory to have DSH load it on demand:
 
 ```bat
 copy /Y skills\swnx-switch\SKILL.md D:\cad-agents\dsh-skills\swnx-switch\SKILL.md
 ```
 
-### 第一次使用：双击菜单
+### First run: double-click the menu
 
-双击仓库根 **`swnx-switch-menu.cmd`**（桌面快捷方式「swnx-switch 转换器」），中文菜单：
+Double-click **`swnx-switch-menu.cmd`** in the repo root (a desktop shortcut named
+"swnx-switch 转换器" points at it). The Chinese menu offers:
 
 ```
-1 环境探测        2 读取零件 → IR + 零件简报
-3 转换零件        4 对比两个零件
-5 查看已有简报    6 打开输出目录 out        0 退出
+1 environment probe       2 read a part -> IR + brief
+3 convert a part          4 compare two parts
+5 view an existing brief  6 open the output folder        0 exit
 ```
 
-选文件用 Windows 文件对话框；转换完窗口不会闪退。
-（直接双击 `swnx-switch.cmd` 只会打印用法并 `exit 2` —— 它是命令行入口，不是双击程序。）
+Files are chosen through native Windows file dialogs and the console stays open afterwards.
+(Double-clicking `swnx-switch.cmd` itself only prints usage and exits with code 2 — it is a
+command-line entry point, not a double-click application.)
 
-### 命令行示例
+### Command line examples
 
 ```bat
-:: 环境探测
+:: environment probe
 swnx-switch.cmd probe
 
-:: 读 SolidWorks 零件 → IR + 简报（约 8 秒）
+:: read a SolidWorks part -> IR + brief (~8 s)
 swnx-switch.cmd read "D:\path\part.SLDPRT" --out out\part.ir.json
 swnx-switch.cmd brief out\part.ir.json
 
-:: SolidWorks → NX（实测 34 秒；自动校验并出报告）
+:: SolidWorks -> NX (34 s measured; validates and writes the report automatically)
 swnx-switch.cmd convert "D:\path\part.SLDPRT" "D:\path\part.prt"
 
-:: NX → SolidWorks
+:: NX -> SolidWorks
 swnx-switch.cmd convert "D:\path\part.prt" "D:\path\part.back.SLDPRT"
 ```
 
-## 4. 命令行参考
+## 4. CLI reference
 
-| 命令 | 作用 | 关键参数 |
+| Command | Purpose | Key options |
 |---|---|---|
-| `probe` | 探测环境与两个 backend | `--json` |
-| `read <file>` | 读件 → IR JSON | `--out`、`--via nx\|solidworks`（读 STEP/Parasolid 时用哪个应用）、`--json` |
-| `brief <ir.json>` | IR → 中文零件简报 | `--out` |
-| `convert <src> <dst>` | 转换 + 校验 + 报告 | `--mode auto\|step\|parasolid`、`--step-variant`、`--force`、`--tolerance KEY=VAL`、`--no-report`、`--drop-intermediate`、`--json` |
-| `compare <ref> <cand>` | 对比两个 IR 或两个原生件 | `--tolerance`、`--json` |
-| `routes` | 列出支持的转换路线 | `--json` |
-| `mcp` | 以 MCP stdio server 运行 | `--workdir`、`--outdir` |
+| `probe` | Inspect the environment and both backends | `--json` |
+| `read <file>` | Read a part into IR JSON | `--out`, `--via nx\|solidworks` (which app imports a STEP/Parasolid file), `--json` |
+| `brief <ir.json>` | Render the IR as a part brief | `--out` |
+| `convert <src> <dst>` | Convert, validate, report | `--mode auto\|step\|parasolid`, `--step-variant`, `--force`, `--tolerance KEY=VAL`, `--no-report`, `--drop-intermediate`, `--json` |
+| `compare <ref> <cand>` | Compare two IR docs or two native files | `--tolerance`, `--json` |
+| `routes` | List supported conversion routes | `--json` |
+| `mcp` | Run the MCP stdio server | `--workdir`, `--outdir` |
 
-**退出码**：`0` 成功（或 verdict 为 pass/warn）；`1` 转换/校验失败；`2` 环境错误（找不到 CAD、缺依赖）。
+**Exit codes**: `0` success (or verdict `pass`/`warn`), `1` conversion/validation failure,
+`2` environment error (CAD not found, dependency missing).
 
-**环境变量**：
+**Environment variables**:
 
-| 变量 | 作用 | 默认 |
+| Variable | Purpose | Default |
 |---|---|---|
-| `NX_HOME` / `UGII_BASE_DIR` | NX 安装根 | 自动探测注册表 |
-| `SWNX_SLDPRT_EXE` / `SOLIDWORKS_EXE` | SLDWORKS.exe 路径 | 自动探测注册表 |
-| `SWNX_TIMEOUT` | 单个 CAD 任务超时秒数 | 900 |
-| `SWNX_NX_JOURNAL` | 覆盖 NX 驱动脚本 | `tools/nx/driver.py` |
-| `SWNX_WORKDIR` / `SWNX_OUTDIR` | 运行目录 / 输出目录 | `<repo>/work`、`<repo>/out` |
-| `SWNX_LIVE=1` | 启用需要真机的测试 | 关闭 |
-| `SWNX_SWITCH_HOME` / `SWNX_PYTHON` | 插件定位项目 / Python | 自动 |
-| `SWNX_ENABLE_MCP=0` | 加载插件但不注册工具 | 开启 |
+| `NX_HOME` / `UGII_BASE_DIR` | NX install root | probed from the registry |
+| `SWNX_SLDPRT_EXE` / `SOLIDWORKS_EXE` | SLDWORKS.exe path | probed from the registry |
+| `SWNX_TIMEOUT` | Per-CAD-job timeout (seconds) | 900 |
+| `SWNX_NX_JOURNAL` | Override the NX journal | `tools/nx/driver.py` |
+| `SWNX_WORKDIR` / `SWNX_OUTDIR` | Run/output directories | `<repo>/work`, `<repo>/out` |
+| `SWNX_LIVE=1` | Enable tests that need the real CAD apps | off |
+| `SWNX_SWITCH_HOME` / `SWNX_PYTHON` | Plugin: project root / interpreter | auto |
+| `SWNX_ENABLE_MCP=0` | Load the plugin without registering tools | on |
 
-## 5. AI 集成：MCP 与 skill
+## 5. AI integration: MCP and skill
 
-MCP 是接口，插件是投放方式，skill 是操作手册——三者可独立使用：
+MCP is the interface, the plugin is the delivery mechanism, the skill is the manual — each works
+independently:
 
 ```bat
-:: 任意 MCP 客户端（Claude Desktop / Codex / Cursor）直接接
+:: any MCP client (Claude Desktop / Codex / Cursor)
 python -m swnx_switch.ai.mcp_server
 ```
 
-| 工具 | 入参 | 返回 | 耗时 |
+| Tool | Arguments | Returns | Runtime |
 |---|---|---|---|
-| `swnx_probe` | — | 环境 + backend 可用性 | <1 s |
-| `swnx_read_part` | `path`、`via?`、`save_ir?`、`brief?` | 摘要 + IR + 简报 | 8–60 s |
-| `swnx_convert_part` | `source`、`target`、`mode?`、`step_variant?`、`force?`、`report?`、`tolerance?` | verdict + 逐项检查 + 报告路径 | 1–5 min |
-| `swnx_compare_parts` | `reference`、`candidate` | 对比结果 | 秒级 |
-| `swnx_part_brief` | `ir` | Markdown 简报 | <1 s |
-| `swnx_list_routes` | — | 路线表 | <1 s |
+| `swnx_probe` | — | environment + backend availability | <1 s |
+| `swnx_read_part` | `path`, `via?`, `save_ir?`, `brief?` | summary + IR + brief | 8–60 s |
+| `swnx_convert_part` | `source`, `target`, `mode?`, `step_variant?`, `force?`, `report?`, `tolerance?` | verdict + per-check table + report paths | 1–5 min |
+| `swnx_compare_parts` | `reference`, `candidate` | comparison result | seconds |
+| `swnx_part_brief` | `ir` | Markdown brief | <1 s |
+| `swnx_list_routes` | — | route table | <1 s |
 
-典型对话（DSH 里装了插件之后）：
+Typical conversation (with the DSH plugin installed):
 
-> 把 `D:\...\叉形接头.SLDPRT` 转成 NX 的 `.prt`，告诉我几何有没有变。
+> Convert `D:\...\fork_joint.SLDPRT` to NX `.prt` and tell me whether the geometry changed.
 
-AI 会依次调 `swnx_probe` →（可选 `swnx_read_part`）→ `swnx_convert_part`，然后汇报
-verdict、体积/包围盒偏差、报告路径，并说明"参数化特征未保留"。
+The agent calls `swnx_probe` → (optionally `swnx_read_part`) → `swnx_convert_part`, then reports the
+verdict, the volume/bounding-box deviation, the report path, and the fact that parametric features
+were not preserved.
 
-## 6. 数据模型（IR）
+## 6. Data model (IR)
 
-`swnx.ir/1`，纯 JSON，单位统一 **mm**（SolidWorks 用米，驱动层负责 ×1000；NX 按零件单位）。
-下面是真实零件（叉形接头）的 `read` 结果节选，数值来自实跑、字段有删节：
+`swnx.ir/1`, plain JSON, millimetres everywhere (SolidWorks uses metres; the driver multiplies by
+1000, NX follows the part units). Real values from an actual `read` of the verified part, with
+fields elided for brevity:
 
 ```jsonc
 {
   "schema": "swnx.ir/1",
   "source": {
-    "path": "D:\\...\\叉形接头.SLDPRT", "format": "sldprt", "size_bytes": 194118,
+    "path": "D:\\...\\fork_joint.SLDPRT", "format": "sldprt", "size_bytes": 194118,
     "sha256": "9e2390bf…", "app": "SolidWorks 2025", "app_version": "33.5.0.53", "readonly": true
   },
   "model": {
-    "name": "叉形接头", "kind": "part", "units": "mm",
+    "name": "fork joint", "kind": "part", "units": "mm",
     "material": {},
     "mass_properties": {
       "volume_mm3": 461736.370946, "surface_area_mm2": 87883.276607,
@@ -199,219 +210,242 @@ verdict、体积/包围盒偏差、报告路径，并说明"参数化特征未�
     "bounding_box": { "min_mm": [-55, -40, -55], "max_mm": [133.5, 40, 55], "size_mm": [188.5, 80, 110] },
     "bodies": [{ "name": "切割-实体5", "type": "solid", "faces": 25, "edges": 45, "vertices": 20,
                  "volume_mm3": 461736.370946, "area_mm2": 87883.276607 }],
-    "features": [{ "name": "Extrude1", "type": "Extrude", "suppressed": false }],   // 本件 45 项，含子特征/文件夹
-    "sketches": [{ "name": "Sketch1", "plane": "前视基准面", "entities": 4 }],      // 本件 8 个
+    "features": [{ "name": "Extrude1", "type": "Extrude", "suppressed": false }],   // 45 in this part, incl. sub-features/folders
+    "sketches": [{ "name": "Sketch1", "plane": "Front Plane", "entities": 4 }],     // 8 in this part
     "geometry_digest": {
-      "plane":    [{ "kind": "plane", "normal": [0, 0, 1], "area_mm2": 8304.7 }],   // 10 个
-      "cylinder": [{ "kind": "cylinder", "radius_mm": 5, "axis": [0, 0, 1] }],      // 10 个：R5/R10/R20/R27.5/R30/R45/R55
-      "torus":    [{ "kind": "torus", "area_mm2": 7397.9 }]                          // 5 个
+      "plane":    [{ "kind": "plane", "normal": [0, 0, 1], "area_mm2": 8304.7 }],   // 10
+      "cylinder": [{ "kind": "cylinder", "radius_mm": 5, "axis": [0, 0, 1] }],      // 10: R5/R10/R20/R27.5/R30/R45/R55
+      "torus":    [{ "kind": "torus", "area_mm2": 7397.9 }]                          // 5
     },
-    "custom_properties": { "材料": "45钢", "图号": "SW-NX-001" },                   // 本件 28 项
-    "configurations": [{ "name": "默认", "active": true }]
+    "custom_properties": { "Material": "45 steel", "DrawingNo": "SW-NX-001" },      // 28 in this part
+    "configurations": [{ "name": "Default", "active": true }]
   },
   "diagnostics": { "warnings": [], "limits": [] }
 }
 ```
 
-字段约定：`*_mm`、`*_mm2`、`*_mm3` 一律按单位后缀解读；读不到的字段**不出现**，
-同时在 `diagnostics.warnings` / `diagnostics.limits` 里写原因，绝不编数
-（例：NX 不暴露惯量 → `limits: ["moments of inertia are not exposed by MeasureBodies"]`）。
+Field rules: `*_mm`, `*_mm2`, `*_mm3` carry their unit in the suffix; a value that could not be read
+is **omitted**, with the reason recorded in `diagnostics.warnings` / `diagnostics.limits` — numbers
+are never invented (e.g. NX does not expose moments of inertia, so the IR says so instead of
+guessing).
 
-`brief` 会把同一份 IR 渲染成中文简报（关键指标表 / 曲面摘要 / 实体表 / 特征树 / 草图 /
-自定义属性 / 转换提示 / 警告），可直接塞进模型上下文。
+`brief` renders the same IR as a Chinese part brief (key figures table, surface digest, body table,
+feature tree, sketches, custom properties, conversion notes, warnings) that can be pasted straight
+into a model context.
 
-## 7. 转换路线与原理
+## 7. Conversion routes and rationale
 
 ```
-源件 ──源应用导出──▶ .x_t / .step ──目标应用导入──▶ 目标件
-  │                                                    │
-  └──── 读 IR（源应用 API）── compare(15 项) ── 读 IR（目标应用 API）──┘
+source ──export──▶ .x_t / .step ──import──▶ target
+   │                                          │
+   └── read IR (source app API) ── compare (15 checks) ── read IR (target app API) ──┘
 ```
 
-| 源 | 目标 | 首选路线 | 备选 |
+| Source | Target | Preferred | Fallback |
 |---|---|---|---|
-| `.sldprt` | `.prt` | SW 导出 Parasolid → NX `ufs.Ps.ImportData` 导入 → 另存 | STEP（本机 NX 批处理 STEP 不可用） |
-| `.prt` | `.sldprt` | NX 导出 Parasolid → SW `LoadFile4` 导入 → 另存 | STEP |
-| 原生 | `.step` / `.x_t` | 源应用直接导出 | — |
-| `.step` / `.x_t` | 原生 | 目标应用导入并另存 | — |
+| `.sldprt` | `.prt` | SW exports Parasolid → NX `ufs.Ps.ImportData` → SaveAs | STEP (NX batch STEP is unavailable on this machine) |
+| `.prt` | `.sldprt` | NX exports Parasolid → SW `LoadFile4` → SaveAs | STEP |
+| native | `.step` / `.x_t` | source app exports directly | — |
+| `.step` / `.x_t` | native | target app imports and saves | — |
 
-**为什么 Parasolid 优先**：两家都是 Parasolid 内核，`.x_t` 交换 B-Rep 不需要重新拟合曲面，
-保真最高、且**不需要 STEP 翻译器许可**。本机 NX 2406 批处理的 STEP 翻译器实测不可用
-（导出只写元数据、导入 0 体，见 [docs/limitations.md](docs/limitations.md) §3），
-所以 `--mode auto` 对经过 NX 的路线走 Parasolid；`--mode step` 可在 STEP 正常授权的机器上强制走 STEP。
+**Why Parasolid first**: both applications are Parasolid-kernel, so `.x_t` moves B-Rep without
+re-fitting surfaces — highest fidelity and **no STEP translator licence required**. The local NX 2406
+batch STEP translator is unusable (export writes metadata only, import yields 0 bodies; see
+[docs/limitations.md](docs/limitations.md) §3), so `--mode auto` routes through Parasolid whenever
+NX is involved. `--mode step` forces STEP on a machine where the translator is licensed.
 
-**回退规则**：`auto` 按路线表依次尝试；导出产 0 实体或导入后 0 体即判定该路线失败，
-换下一条；全部失败则 `fail` 并保留两端 IR、中间文件和日志，不静默降级到 STL/网格。
+**Fallback policy**: `auto` tries the route table in order; an export with 0 solids or an import with
+0 bodies fails that route and the next one is tried. If all fail the verdict is `fail`, with both
+IRs, intermediate files and logs kept — never a silent downgrade to STL/mesh.
 
-## 8. 校验机制
+## 8. Validation
 
-每次 `convert` 都做同样的事：读源件 IR → 导出 → 导入 → 读目标件 IR → 逐项对比。
-对比双方是**两个 CAD 应用各自报告的数值**，不是对 exchange 文件的文本猜测。
+Every `convert` does the same thing: read source IR → export → import → read target IR → compare.
+The two sides are **what the two CAD applications report**, not a text guess over the exchange file.
 
-| 检查项 | 默认容差 | 判定 |
+| Check | Default tolerance | Severity |
 |---|---|---|
-| IR 结构 / 单位 | 必须合法且为 mm | 必需 |
-| 实体数量 | 必须相等 | 必需 |
-| 体积 | 相对 1e-3（绝对底 1e-3 mm³） | 必需 |
-| 表面积 | 相对 2e-3 | 必需 |
-| 包围盒 每轴 / 角点 | 0.05 mm / 0.1 mm（相对 1e-3） | 必需 |
-| 质心 | 0.05 mm | 必需（两侧都有时） |
-| 质量 / 密度一致性 | 相对 1e-3 / 1e-6 | 必需（有材料时） |
-| 面/边数量 | 仅信息 | 可选 |
-| 特征树差异 | 仅信息 | 可选 |
+| IR schema / units | valid, mm | required |
+| Body count | must match | required |
+| Volume | rel 1e-3 (abs floor 1e-3 mm³) | required |
+| Surface area | rel 2e-3 | required |
+| Bounding box, per axis / corners | 0.05 mm / 0.1 mm (rel 1e-3) | required |
+| Centroid | 0.05 mm | required (when both present) |
+| Mass / density consistency | rel 1e-3 / 1e-6 | required (when material is present) |
+| Face/edge counts | informational | optional |
+| Feature-tree delta | informational | optional |
 
-**结论语义**：`pass`（必需项全过）/ `warn`（只有可选/信息项异常，例如特征树丢失）/
-`fail`（任一必需项失败或**无法确认**）。`unavailable` 不算通过——缺数据的必需检查判 `fail`，
-这是刻意设计：不能因为没读到就假装一致。
+**Verdict semantics**: `pass` (all required checks pass) / `warn` (only optional/informational
+anomalies, e.g. feature-tree loss) / `fail` (any required check fails **or cannot be confirmed**).
+`unavailable` is not a pass: a required check without data fails, deliberately — silence must not
+look like agreement.
 
-容差可覆盖：`--tolerance volume=2e-3 --tolerance bbox_abs=0.1`（短名会映射到规范键：
-`volume_rel` / `area_rel` / `bbox_abs_mm` / `bbox_rel` / `bbox_corner_abs_mm` / `centroid_abs_mm` /
-`mass_rel` / `density_rel`）。
+Tolerances are overridable: `--tolerance volume=2e-3 --tolerance bbox_abs=0.1`. Short names map to
+canonical keys (`volume_rel`, `area_rel`, `bbox_abs_mm`, `bbox_rel`, `bbox_corner_abs_mm`,
+`centroid_abs_mm`, `mass_rel`, `density_rel`).
 
-报告：`work/.../validation.md`（中文表格：检查项 / 实测 / 期望 / 偏差 / 容差 / 结论）
-+ `report.json`（机器可读）。
+Reports: `work/.../validation.md` (Chinese table: check / actual / expected / delta / tolerance /
+verdict) plus `report.json` for machines.
 
-## 9. 实测结果
+## 9. Measured results
 
-环境：SolidWorks 2025 SP05（33.5.0.53）× NX 2406（`D:\UG NX2406`）× Python 3.12.10 + pywin32。
-测试件：`叉形接头.SLDPRT`——1 实体 / 25 面 / 45 特征 / 8 草图；体积 461 736.370946 mm³；
-包围盒 188.5 × 80 × 110 mm。
+Environment: SolidWorks 2025 SP05 (33.5.0.53) × NX 2406 (`D:\UG NX2406`) × Python 3.12.10 + pywin32.
+Test part: the fork joint — 1 body / 25 faces / 45 features / 8 sketches; volume 461,736.370946 mm³;
+bounding box 188.5 × 80 × 110 mm.
 
-**SolidWorks → NX**（`scripts/verify_e2e.py --mode parasolid`）：
+**SolidWorks → NX** (`scripts/verify_e2e.py --mode parasolid`):
 
-| 检查 | 实测 | 期望 | 偏差 | 结论 |
+| Check | Actual | Expected | Delta | Verdict |
 |---|---|---|---|---|
-| 实体数 | 1 | 1 | 0 | pass |
-| 体积 mm³ | 461 736.3709456 | 461 736.370946 | −3.7e−07 | pass |
-| 表面积 mm² | 87 883.2766 | 87 883.2766 | −4.7e−07 | pass |
-| 包围盒 mm | 188.5 × 80 × 110 | 188.5 × 80 × 110 | 0 | pass |
-| 质心 mm | 26.3044, −0.1940, 0.0 | 同左 | 9.9e−08 | pass |
-| 质量 kg | 0.461736 | 0.461736 | 0 | pass |
-| 面/边 | F25 / E45 | F25 / E45 | 0 | pass |
-| 特征树 | 2（导入体） | 45（参数化） | −43 | warn（预期） |
+| Bodies | 1 | 1 | 0 | pass |
+| Volume mm³ | 461,736.3709456 | 461,736.370946 | −3.7e−07 | pass |
+| Surface area mm² | 87,883.2766 | 87,883.2766 | −4.7e−07 | pass |
+| Bounding box mm | 188.5 × 80 × 110 | same | 0 | pass |
+| Centroid mm | 26.3044, −0.1940, 0.0 | same | 9.9e−08 | pass |
+| Mass kg | 0.461736 | 0.461736 | 0 | pass |
+| Faces/edges | F25 / E45 | F25 / E45 | 0 | pass |
+| Feature tree | 2 (imported body) | 45 (parametric) | −43 | warn (expected) |
 
-耗时 **34.2 s**（SW 导出 7 s + NX 导入 10 s + 两端读件与校验）；产物 `out/e2e/叉形接头.prt`（106 616 B）。
+Runtime **34.2 s** (SW export 7 s + NX import 10 s + reads and validation); output
+`out/e2e/fork_joint.prt` (106,616 B).
 
-**NX → SolidWorks**（同一脚本的回程）：体积偏差 +3.7e−07 mm³，表面积 +4.7e−07 mm²，
-包围盒/质心/面边全部 pass；耗时 **35.2 s**；产物 `out/e2e/叉形接头.roundtrip.SLDPRT`（160 391 B）。
+**NX → SolidWorks** (the return leg of the same script): volume delta +3.7e−07 mm³, area
++4.7e−07 mm², bounding box / centroid / faces / edges all pass; **35.2 s**; output
+`out/e2e/fork_joint.roundtrip.SLDPRT` (160,391 B).
 
-原始证据（可逐项核对、可复跑）：[docs/evidence/README.md](docs/evidence/README.md)
-（完整 `e2e-evidence.json` + 两份验证报告 + 两端驱动验收记录）。
+Raw evidence (auditable and reproducible): [docs/evidence/README.md](docs/evidence/README.md) —
+full `e2e-evidence.json`, both validation reports, and each driver's acceptance record.
 
-## 10. 已知限制
+## 10. Known limitations
 
-1. **参数化特征不保留**：目标端是导入实体/哑体，无草图、参数、父子关系（行业上限）。
-2. **装配体 / 工程图 / PMI 属 pilot**：能读能导，语义转换只标 `warn`；PMI/公差/2D 标注不承诺。
-3. **面/边 ID 会变**：按 `Face37` 选面的下游脚本需重选。
-4. **必须有本机授权可用的 SolidWorks / NX**：不逆向格式、不绕过许可、不承诺免安装。
-5. **慢**：单次转换 30 s–2 min（NX 批处理与 SW COM 启动是主要成本），同 backend 串行排队。
-6. **大件未验证**：>1000 实体装配不在本版验证范围。
+1. **No parametric features**: the target is a dumb solid — no sketches, parameters or parent/child
+   relations (industry ceiling).
+2. **Assemblies / drawings / PMI are pilot**: readable and exportable, but semantic conversion is
+   `warn`-only; PMI, tolerances and 2D annotations are not promised.
+3. **Face/edge IDs change**: downstream scripts that select `Face37` must re-select.
+4. **Requires locally licensed SolidWorks / NX**: no format reverse-engineering, no licence bypass,
+   no "works without the apps installed".
+5. **Slow**: 30 s – 2 min per conversion (NX batch and SW COM start-up dominate); jobs queue per backend.
+6. **Large assemblies unverified**: >1000 bodies is outside this release's scope.
 
-完整清单与"已验证 / 未验证"表见 [docs/limitations.md](docs/limitations.md)。
+Full list and the verified/unverified table: [docs/limitations.md](docs/limitations.md).
 
-## 11. 排错手册
+## 11. Troubleshooting
 
-| 症状 | 原因 | 处理 |
+| Symptom | Cause | Fix |
 |---|---|---|
-| `environment error` / backend unavailable | 找不到 NX/SW 或缺 pywin32 | 设 `NX_HOME` / `SWNX_SLDPRT_EXE`；`pip install pywin32` |
-| `pywintypes.com_error -2146959355 CO_E_SERVER_EXEC_FAILURE` | DSH 沙箱拦住了 COM 跨进程启动 | 用 `danger-full-access` 跑，或普通终端跑 CLI |
-| NX 日志只有 `failed to initialize UFUN 948792` | NX 读不到许可/用户配置目录 | 同上；沙箱外运行 |
-| `no exchange route succeeded` | 两条路线都失败 | 看每次 attempt 的 export/import 日志 |
-| `STEP import produced 0 bodies` | 本机 NX STEP 翻译器不可用 | 用 `--mode parasolid`（默认 auto 已优先） |
-| `target already exists` | 目标文件已存在 | 加 `--force` |
-| 转换成功但 `feature_tree: warn` | 参数化特征未保留 | 这是预期，不是失败 |
-| 体积/包围盒偏差过大（>1e-3） | 丢体、单位错、模型本身不同 | 看报告逐项；确认源件 sha256 |
+| `environment error` / backend unavailable | NX/SW not found or pywin32 missing | set `NX_HOME` / `SWNX_SLDPRT_EXE`; `pip install pywin32` |
+| `pywintypes.com_error -2146959355 CO_E_SERVER_EXEC_FAILURE` | the DSH sandbox blocks out-of-process COM launch | run with `danger-full-access`, or run the CLI in a normal terminal |
+| NX log line `failed to initialize UFUN 948792` | NX cannot read its licence/user profile dirs | same as above |
+| `no exchange route succeeded` | both routes failed | read the per-attempt export/import logs |
+| `STEP import produced 0 bodies` | local NX STEP translator unusable | use `--mode parasolid` (auto already prefers it) |
+| `target already exists` | destination exists | add `--force` |
+| Conversion succeeds with `feature_tree: warn` | parametric features are not preserved | expected, not a failure |
+| Volume/bbox deviation >1e-3 | lost body, unit error, or a different model | read the report; check the source sha256 |
 
-**驱动层三个坑（已绕过，勿改回）**：
-SolidWorks 不能用 `OpenDoc6` 打开外来 `.prt`/`.x_t`（会打死 COM 服务器，必须
-`GetImportFileData` + `LoadFile4`）；NX 批处理 `DexManager.CreateParasolidImporter().Commit()`
-是静默 no-op（必须 `ufs.Ps.ImportData`）；NX 批处理 STEP 翻译器本机不可用。
+**Three driver traps (already worked around — do not undo)**:
+SolidWorks must not `OpenDoc6` a foreign `.prt`/`.x_t` (it kills the COM server; use
+`GetImportFileData` + `LoadFile4`); NX batch `DexManager.CreateParasolidImporter().Commit()` is a
+silent no-op (use `ufs.Ps.ImportData`); the NX batch STEP translator is unusable on this machine.
 
-## 12. 架构与目录
+## 12. Architecture and layout
 
 ```
-CLI / MCP / DSH 插件 / skill
+CLI / MCP / DSH plugin / skill
         │
-   pipeline.py   转换编排：读件 → 导出 → 导入 → 读回 → 校验 → 报告
-   validate.py   15 项容差对比（纯 stdlib，不需要 CAD）
-   report.py     中文 Markdown + JSON 报告
-   ir.py         中性模型 + 构造器 + schema 校验
-        │  Job(JSON) → 子进程 → JobResult(JSON)
-   backends/base.py   子进程协议、超时、日志、按 backend 跨进程锁
-   backends/nx.py  → tools/nx/driver.py   NXOpen journal（NX 内嵌 Python 3.10）
-   backends/sw.py  → tools/sw/driver.py   pywin32 COM（宿主 Python 3.12）
+   pipeline.py   orchestration: read -> export -> import -> read back -> validate -> report
+   validate.py   15 tolerance checks (pure stdlib, no CAD needed)
+   report.py     Chinese Markdown + JSON reports
+   ir.py         neutral model, builders, schema validation
+        │  Job(JSON) -> subprocess -> JobResult(JSON)
+   backends/base.py   subprocess protocol, timeout, logging, cross-process lock per backend
+   backends/nx.py  -> tools/nx/driver.py   NXOpen journal (NX embedded Python 3.10)
+   backends/sw.py  -> tools/sw/driver.py   pywin32 COM (host Python 3.12)
 ```
 
-| 路径 | 作用 |
+| Path | Purpose |
 |---|---|
 | `src/swnx_switch/` | ir / pipeline / validate / report / cli / lock / paths / errors |
-| `src/swnx_switch/ai/` | brief（简报）/ tools（工具注册表）/ mcp_server（stdio） |
-| `src/swnx_switch/backends/` | base（协议+锁）/ nx.py / sw.py |
-| `tools/nx/driver.py` | NX 批处理 journal（纯 ASCII，3.10 兼容） |
-| `tools/sw/driver.py` | SolidWorks COM 驱动（独立进程，失败也写结果 JSON） |
-| `plugin/` | DSH 插件包（注册一行 MCP；含 linked 插件的 peer 解析） |
-| `skills/swnx-switch/` | 给 AI 的操作手册 |
+| `src/swnx_switch/ai/` | brief / tools (registry) / mcp_server (stdio) |
+| `src/swnx_switch/backends/` | base (protocol + lock) / nx.py / sw.py |
+| `tools/nx/driver.py` | NX batch journal (pure ASCII, 3.10-compatible) |
+| `tools/sw/driver.py` | SolidWorks COM driver (separate process, always writes a result file) |
+| `plugin/` | DSH plugin package (one MCP row; peer resolution for linked installs) |
+| `skills/swnx-switch/` | operating manual for the agent |
 | `scripts/` | `verify_e2e.py` / `run_tests.py` / `menu.ps1` |
-| `tests/` | IR、MCP 协议、校验器（92 项，无需 CAD） |
-| `docs/` | 架构 / 可行性 / 社区调研 / 限制 / 证据 |
+| `tests/` | IR, MCP protocol, validator (92 tests, no CAD needed) |
+| `docs/` | architecture / feasibility / research / limitations / evidence |
 
-扩展新 CAD：实现 `Backend` 子类（`available` / `app_version` / `_command`）→ 写读 `SWNX_REQUEST`、
-写 `SWNX_RESULT` 的驱动脚本 → 在 `format_owner()` / `BackendRegistry` 登记格式 → 加 `--live` 测试。
+Adding another CAD app: subclass `Backend` (`available` / `app_version` / `_command`), write a driver
+that reads `SWNX_REQUEST` and writes `SWNX_RESULT`, register the format in `format_owner()` /
+`BackendRegistry`, add a `--live` test.
 
-## 13. 开发与测试
+## 13. Development and testing
 
 ```bat
-:: 全量测试（无第三方依赖，92 项）
+:: full suite (no third-party dependencies, 92 tests)
 python scripts\run_tests.py
 
-:: 有 pytest 时
+:: when pytest is available
 python -m pytest tests -q
 
-:: 真机端到端（会启动 SW 和 NX，约 70 秒；DSH 里需 danger-full-access）
+:: real-machine end-to-end (starts SW and NX, ~70 s; needs danger-full-access inside DSH)
 python scripts\verify_e2e.py --mode parasolid --force
 ```
 
-测试分层：IR 模型、MCP 协议（真起子进程走 JSON-RPC）、校验器（fixtures 覆盖 pass/warn/fail/
-unavailable）、两个驱动的离线契约（命令串、env、结果解析）、以及 `SWNX_LIVE=1` 的真机读件测试。
-端到端脚本把环境、耗时、文件大小、逐项校验写进 `out/e2e/evidence.json`，README 数字出自那里。
+Coverage: IR model, MCP protocol (a real subprocess driven over JSON-RPC), validator (fixtures for
+pass/warn/fail/unavailable), both drivers' offline contracts (command line, environment, result
+parsing), and `SWNX_LIVE=1` read tests on the real applications. The end-to-end script writes
+environment, timings, file sizes and per-check results to `out/e2e/evidence.json`; the numbers in
+this README come from there.
 
-## 14. 社区调研摘要
+## 14. Community research summary
 
-完整调研（248 行、逐条带出处）见 [docs/research-community.md](docs/research-community.md)，
-本机裁决见 [docs/feasibility.md](docs/feasibility.md)。五条直接影响设计的结论：
+Full survey (248 lines, cited per claim): [docs/research-community.md](docs/research-community.md);
+machine-specific decision memo: [docs/feasibility.md](docs/feasibility.md). Five findings shaped the
+design:
 
-1. **没有能可靠互转 `.sldprt` ⇄ `.prt` 的开源项目**；开源对 `.sldprt` 只到容器/元数据级
-   （cadmpeg、openswx、sldkit），没有可用 B-Rep，更没有 writer。
-2. **商业转换器也不写原生格式**：CAD Exchanger 把 SW/NX 列为只读（R），可写的是 STEP/Parasolid/JT/ACIS；
-   Datakit 的能力表里没有"特征/参数/草图"这一层。
-3. **厂商自己的路线也是中性格式**：Siemens 帮助原文"部件特征和参数无法转换，已转换的模型包含无参数的体"；
-   SW 3D Interconnect 虽能直开 NX 2406 的 `.prt`，但只提取 Parasolid 信息，是只读派生而非转换。
-4. **Parasolid 是这对软件的最短路径**：两家同内核；开源栈（OCCT）只能 import 不能 export `.x_t`，
-   所以必须用厂商自己的导出器——这正是本项目的做法。
-5. **"AI 读 CAD 特征"的现实边界**：nxlib / solidworks-mcp / FreeCAD MCP 的共同套路是
-   "包官方 API、输出结构化 JSON"；ML 侧（BRepNet/UV-Net/DeepCAD）做 B-Rep 分割/生成，不等于可编辑特征识别。
+1. **No open-source project reliably converts `.sldprt` ⇄ `.prt`.** Open-source work on `.sldprt`
+   stops at container/metadata level (cadmpeg, openswx, sldkit) — no usable B-Rep and no writer.
+2. **Commercial converters do not write native formats either.** CAD Exchanger lists both SOLIDWORKS
+   and NX as read-only (R); writable formats are STEP/Parasolid/JT/ACIS. Datakit's mapping table has
+   no feature/parameter/sketch layer.
+3. **The vendors' own route is a neutral format.** Siemens help states outright that part features and
+   parameters cannot be converted and the result contains parameterless bodies. SolidWorks 3D
+   Interconnect can open an NX 2406 `.prt`, but extracts Parasolid information only — a read-only
+   derived body, not a conversion.
+4. **Parasolid is the shortest path between these two applications.** Both are Parasolid-kernel; the
+   open-source stack (OCCT) can import but not export `.x_t`, so the file must come from the vendors'
+   own exporters — which is exactly what this project does.
+5. **The realistic ceiling of "AI reads CAD features".** Projects such as nxlib, solidworks-mcp and
+   FreeCAD MCP all wrap the vendor API and emit structured JSON; ML work (BRepNet/UV-Net/DeepCAD)
+   does B-Rep segmentation/generation, not editable feature recognition. Hence "official API + neutral
+   IR" instead of feature guessing.
 
-## 15. 版本与路线图
+## 15. Version and roadmap
 
-**0.1.0（当前）**：IR 读取、双向转换（Parasolid 路线已验证）、15 项容差校验、双语报告、
-CLI / 双击菜单 / MCP / DSH 插件 / skill、92 项自动化测试。
+**0.1.0 (current)**: IR extraction, bidirectional conversion (Parasolid route verified), 15-check
+validation, bilingual reports, CLI / double-click menu / MCP / DSH plugin / skill, 92 automated tests.
 
-**计划中**：装配体 BOM/实例映射；STEP 正常授权环境下的 `--mode step` 验证；
-工程图视图/标注的只读提取；批处理（目录级）转换与增量重跑。
+**Planned**: assembly BOM/instance mapping; `--mode step` verification on a machine with a licensed
+STEP translator; read-only extraction of drawing views/annotations; directory-level batch conversion
+with incremental re-runs.
 
-**明确不做**：特征级重建（没有可验证的方法，商业工具也不承诺）；原生格式逆向；
-绕过许可证；把 STL/网格当转换格式。
+**Explicitly out of scope**: feature-level reconstruction (no verifiable method, and commercial tools
+do not promise it); reverse-engineering native formats; licence bypass; treating STL/mesh as an
+exchange format.
 
-## 16. 许可与合规
+## 16. License and compliance
 
-MIT（见 [LICENSE](LICENSE)）。使用本机已授权的 SolidWorks / NX 许可证运行，不绕过任何授权机制，
-不逆向原生文件格式。转换产物的知识产权与合规责任在用户侧。NX 批处理会占用一个许可证席位。
+MIT (see [LICENSE](LICENSE)). The tool runs on locally licensed SolidWorks / NX installations, does
+not bypass licensing, and does not reverse-engineer native file formats. Ownership and compliance of
+converted artefacts remain with the user. NX batch sessions occupy one licence seat.
 
-## 17. 参考
+## 17. References
 
-- 调研与出处：[docs/research-community.md](docs/research-community.md)
-- 本机路线裁决：[docs/feasibility.md](docs/feasibility.md)
-- 架构：[docs/architecture.md](docs/architecture.md) · 限制：[docs/limitations.md](docs/limitations.md)
-- 实测证据：[docs/evidence/](docs/evidence/README.md)
-- 同类思路：nxlib（NXOpen 封装）、solidworks-mcp（COM → MCP）、FreeCAD MCP Bridge、
-  CAD Exchanger / Datakit（商业转换器的能力边界）
+- Research with sources: [docs/research-community.md](docs/research-community.md)
+- Machine-specific decision memo: [docs/feasibility.md](docs/feasibility.md)
+- Architecture: [docs/architecture.md](docs/architecture.md) · Limitations: [docs/limitations.md](docs/limitations.md)
+- Evidence: [docs/evidence/](docs/evidence/README.md)
+- Similar approaches: nxlib (NXOpen wrapper), solidworks-mcp (COM → MCP), FreeCAD MCP Bridge,
+  CAD Exchanger / Datakit (what commercial converters actually promise)
