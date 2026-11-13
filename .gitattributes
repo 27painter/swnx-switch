@@ -1,0 +1,14 @@
+# Normalize line endings: batch/PowerShell scripts must stay CRLF for cmd.exe,
+# everything else can be LF.
+* text=auto
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.jsonc text eol=lf
+*.mjs text eol=lf
+*.js text eol=lf
+*.yml text eol=lf
+*.toml text eol=lf
