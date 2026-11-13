@@ -3,14 +3,19 @@
 // One MCP row, no upstream installation step: the "server" is the project's own
 // Python package, so loading this plugin is cheap and a broken checkout fails
 // loudly at load time instead of handing the agent tools that never answer.
+//
+// The MCP client is resolved by ./mcp-client.mjs rather than a bare import: a
+// plugin installed with `link:` is loaded from its real path, where Node cannot
+// see the host's node_modules.
 import path from "node:path";
 
-import * as McpClient from "@deepseek-ai/dsh-mcp-client";
+import { loadMcpClient } from "./mcp-client.mjs";
+import { missingPieces, resolveLayout } from "./paths.mjs";
 
-import { PKG, missingPieces, resolveLayout } from "./paths.mjs";
+const McpClient = await loadMcpClient();
 
 export const name = "swnx-switch";
-export const inject = McpClient.inject;
+export const inject = McpClient.inject ?? [];
 
 const LOG_PREFIX = "[swnx-switch]";
 const say = (message) => process.stderr.write(`${LOG_PREFIX} ${message}\n`);

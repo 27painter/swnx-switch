@@ -167,6 +167,18 @@ cd plugin && node bin\swnx-switch.mjs doctor
 重启 DSH 后 agent 就能直接调用 `swnx_read_part` / `swnx_convert_part` 等工具。
 任意 MCP 客户端也可以直接 `python -m swnx_switch.ai.mcp_server`（stdio）。
 
+### 方式 D：加一个 skill（让 agent 知道何时用、怎么读结论）
+
+[skills/swnx-switch/SKILL.md](skills/swnx-switch/SKILL.md) 是给 AI 的操作手册：先 probe、
+再 read/brief/convert、怎么判读 pass/warn/fail、已知坑、失败怎么处理、汇报模板。
+装到 skill 目录即可被 DSH 按需加载（本机已装到 `D:\cad-agents\dsh-skills\swnx-switch\`）：
+
+```bat
+copy /Y skills\swnx-switch\SKILL.md D:\cad-agents\dsh-skills\swnx-switch\SKILL.md
+```
+
+插件给"能力"，skill 给"判断力"，两者可以独立使用。
+
 ## 9. MCP 工具
 
 | 工具 | 用途 |

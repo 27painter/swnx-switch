@@ -25,3 +25,5 @@ Thumbs.db
 desktop.ini
 pytest-cache-files-*
 
+node_modules/
+

@@ -32,11 +32,26 @@
 3. 在该 profile 目录执行 `pnpm install`，然后重启 dsh。
 4. 验证：`node "<repo>/plugin/bin/swnx-switch.mjs" doctor`。
 
+> **本机状态（2026-11-13 已安装）**：`~/.dsh/profiles/web/package.json` 已加入
+> `swnx-switch: link:D:/27painter/Documents/swnx-switch/plugin` 与 bundles 项，
+> `pnpm install` 已完成，备份在 `package.json.bak-swnx-20261113-195516`。
+> skill 已装到 `D:\cad-agents\dsh-skills\swnx-switch\SKILL.md`。**重启 dsh 后生效。**
+
+### 链接安装时的一个 Node 解析坑
+
+插件用 `link:` 安装时，dsh 通过真实路径加载它（`D:\...\swnx-switch\plugin`），
+Node 会从这个目录向上找 `node_modules`，所以宿主自己的
+`@deepseek-ai/dsh-mcp-client`（在全局 dsh 安装目录里）**裸 import 找不到**。
+`lib/mcp-client.mjs` 处理了这件事：先正常 import，失败后按 `process.argv[1]` /
+`process.execPath` 解析，再扫全局 npm/pnpm 安装目录；都拿不到才抛带修复提示的错误。
+因此本插件同时支持"link 安装"和"拷进 profile 的 node_modules"，插件目录里不需要放
+`node_modules`。
+
 插件在加载时会做三件事，任一不满足就**抛错**而不是静默注册：找到含
 `src/swnx_switch/ai/mcp_server.py` 的项目目录、找到 Python、`python -m swnx_switch.cli probe`
 能跑通。
 
-项目位置解析顺序：`SWNX_SWITCH_HOME` → 本机默认 checker out
+项目位置解析顺序：`SWNX_SWITCH_HOME` → 本机默认 checkout
 `D:\27painter\Documents\swnx-switch` → 相对本包的 `..` / `../..`。
 
 ## 安装（非 DSH 的任意 MCP 客户端）
