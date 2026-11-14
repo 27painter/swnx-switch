@@ -13,6 +13,20 @@ Doing (1) and (4) through the *applications'* own APIs rather than by parsing th
 exchange file is deliberate: the report then says "SolidWorks says this part is
 31.4 cm3 and NX says the imported part is 31.4 cm3", which is the claim a user
 actually cares about.  Parsing STEP text would only prove the file is text.
+
+Reliability features that came out of a real user report
+-------------------------------------------------------
+* **Progress milestones** (``progress`` callback): a 30 s – 5 min conversion must
+  not be a black box.  Stages are emitted as ``source_read``, ``export``,
+  ``import``, ``target_read``, ``validate``, ``report``.
+* **Request validation before any CAD starts**: a target that already exists, a
+  same-format source/target pair, or a ``mode`` that contradicts the target
+  extension fails in milliseconds instead of after a conversion.
+* **``keep_app``**: leave the CAD application running between jobs so the next
+  job attaches instead of cold-starting it (the failure mode where SolidWorks
+  refuses to start after repeated COM start/stop).
+* **Report next to the target**: a copy of ``validation.md`` is written beside
+  the produced part, so the user does not have to dig through ``work/``.
 """
 
 from __future__ import annotations
@@ -23,7 +37,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import ir
 from .backends import BackendRegistry, Job, detect_format, format_owner
@@ -31,6 +45,9 @@ from .errors import ConversionError, SwnxError
 from .paths import ensure_outdir, ensure_workdir
 
 EXCHANGE_EXT = {"step": ".step", "parasolid": ".x_t"}
+
+#: Progress callback: ``cb(stage, info)``; never raises into the pipeline.
+Progress = Callable[[str, dict], None]
 
 
 @dataclass
@@ -84,11 +101,14 @@ class ConversionResult:
             "mode": f"{self.source_format}->{self.target_format}",
             "source": str(self.source),
             "target": str(self.target),
+            "target_sha256": self.paths.get("target_sha256"),
             "run_dir": str(self.run_dir),
             "reference_ir": self.paths.get("reference_ir"),
             "candidate_ir": self.paths.get("candidate_ir"),
             "report_json": self.paths.get("report_json"),
             "report_md": self.paths.get("report_md"),
+            "report_md_near": self.paths.get("report_md_near"),
+            "report_json_near": self.paths.get("report_json_near"),
             "attempts": [a.as_dict() for a in self.attempts],
             "warnings": self.warnings,
             "error": self.error,
@@ -112,6 +132,10 @@ class Pipeline:
         self.outdir = ensure_outdir(outdir)
         self.timeout = float(timeout or os.environ.get("SWNX_TIMEOUT") or 900)
         self.registry = registry or BackendRegistry()
+        # Per-run state (one Pipeline instance is used by one conversion/job).
+        self._progress: Progress | None = None
+        self._keep_app = False
+        self._report_dir: Path | None = None
 
     # ------------------------------------------------------------------ #
     # reading
@@ -122,6 +146,7 @@ class Pipeline:
         *,
         via: str | None = None,
         label: str = "read",
+        keep_app: bool = False,
     ) -> dict:
         """Read any supported file into the IR.
 
@@ -133,6 +158,7 @@ class Pipeline:
         source = Path(path).resolve()
         if not source.exists():
             raise SwnxError(f"input file not found: {source}")
+        self._keep_app = bool(keep_app)
         fmt = detect_format(source)
         if fmt in ("step", "parasolid"):
             backend = self._pick_backend(via)
@@ -140,7 +166,13 @@ class Pipeline:
             native = run_dir / f"{source.stem}.{'prt' if backend.name == 'nx' else 'SLDPRT'}"
             native_fmt = "prt" if backend.name == "nx" else "sldprt"
             result = backend.run(
-                Job("import", input=str(source), output=str(native), format=native_fmt),
+                Job(
+                    "import",
+                    input=str(source),
+                    output=str(native),
+                    format=native_fmt,
+                    options=self._options(),
+                ),
                 workdir=run_dir / backend.name,
                 timeout=self.timeout,
             )
@@ -156,7 +188,7 @@ class Pipeline:
 
     def _read_native(self, backend, path: Path, run_dir: Path) -> dict:
         result = backend.run(
-            Job("read", input=str(path), output=None, format=None),
+            Job("read", input=str(path), output=None, format=None, options=self._options()),
             workdir=run_dir / backend.name,
             timeout=self.timeout,
         )
@@ -191,35 +223,40 @@ class Pipeline:
         tolerances: dict | None = None,
         report: bool = True,
         task: str | None = None,
+        keep_app: bool = False,
+        preflight: bool = False,
+        report_dir: str | os.PathLike | None = None,
+        progress: Progress | None = None,
     ) -> ConversionResult:
         started = time.time()
         src = Path(source).resolve()
         dst = Path(target).resolve()
-        if not src.exists():
-            raise SwnxError(f"source file not found: {src}")
-        if dst.exists() and not force:
-            raise ConversionError(
-                f"target already exists: {dst}",
-                hint="pass --force to overwrite",
-            )
-        dst.parent.mkdir(parents=True, exist_ok=True)
+        self._progress = progress
+        self._keep_app = bool(keep_app)
+        self._report_dir = Path(report_dir).resolve() if report_dir else None
 
         src_fmt = detect_format(src)
         dst_fmt = detect_format(dst)
-        run_dir = self._run_dir(f"convert-{src_fmt}-to-{dst_fmt}")
         result = ConversionResult(
             ok=False,
             source=src,
             target=dst,
             source_format=src_fmt,
             target_format=dst_fmt,
-            run_dir=run_dir,
+            run_dir=self.workdir,
             paths={},
         )
 
         try:
-            if src_fmt in ("step", "parasolid") and dst_fmt in ("step", "parasolid"):
-                raise ConversionError("source and target are both exchange formats; nothing to convert")
+            self._validate_request(src, dst, src_fmt, dst_fmt, mode, force)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            run_dir = self._run_dir(f"convert-{src_fmt}-to-{dst_fmt}")
+            result.run_dir = run_dir
+            self._emit("request_validated", source=src_fmt, target=dst_fmt, mode=mode)
+
+            if preflight:
+                self._preflight(src_fmt, dst_fmt)
+
             if src_fmt in ("step", "parasolid"):
                 self._import_only(src, dst, dst_fmt, step_variant, run_dir, result)
             elif dst_fmt in ("step", "parasolid"):
@@ -228,14 +265,26 @@ class Pipeline:
                 self._native_to_native(
                     src, dst, src_fmt, dst_fmt, mode, step_variant, run_dir, result, keep_intermediate
                 )
-            result.seconds = time.time() - started
+
+            result.seconds = round(time.time() - started, 3)
+            if result.ok and dst.exists():
+                try:
+                    result.paths["target_sha256"] = ir.sha256_of(dst)
+                except OSError as exc:  # pragma: no cover - unreadable target
+                    result.warnings.append(f"could not hash the target: {exc}")
             self._verify(result, tolerances=tolerances, report=report, task=task)
         except SwnxError as exc:
             result.error = exc.message
             result.warnings.extend(filter(None, [exc.detail, exc.hint]))
             result.ok = False
             result.verdict = "fail"
-            result.seconds = time.time() - started
+            result.seconds = round(time.time() - started, 3)
+        finally:
+            self._progress = None
+            self._keep_app = False
+            self._report_dir = None
+        if result.ok:
+            self._emit("done", verdict=result.verdict, seconds=result.seconds)
         return result
 
     # -- the three shapes of a conversion --------------------------------- #
@@ -246,6 +295,7 @@ class Pipeline:
         dst_backend = self.registry.for_format(dst_fmt)
         result.reference_ir = self._dump_ir(src_backend, src, run_dir, "source", result)
         result.paths["reference_ir"] = str(run_dir / "ir-source.json")
+        self._emit("source_read", app=src_backend.name)
 
         exchanges = choose_exchanges(mode, src_fmt, dst_fmt)
         for exchange in exchanges:
@@ -259,7 +309,7 @@ class Pipeline:
                         input=str(src),
                         output=str(exchange_file),
                         format=exchange,
-                        options={"step_variant": step_variant},
+                        options=self._options({"step_variant": step_variant}),
                     ),
                     workdir=run_dir / src_backend.name,
                     timeout=self.timeout,
@@ -268,6 +318,13 @@ class Pipeline:
                 attempt.export_seconds = exported.duration_s
                 attempt.log = exported.log
                 result.warnings.extend(f"export {exchange}: {w}" for w in exported.warnings)
+                self._emit(
+                    "export",
+                    exchange=exchange,
+                    ok=exported.ok,
+                    seconds=round(exported.duration_s, 2),
+                    error=exported.error,
+                )
                 if not exported.ok:
                     attempt.error = exported.error or "export failed"
                     result.attempts.append(attempt)
@@ -281,7 +338,13 @@ class Pipeline:
                     exported_path = exchange_file
                 attempt.file = str(exported_path)
                 imported = dst_backend.run(
-                    Job("import", input=str(exported_path), output=str(dst), format=dst_fmt),
+                    Job(
+                        "import",
+                        input=str(exported_path),
+                        output=str(dst),
+                        format=dst_fmt,
+                        options=self._options(),
+                    ),
                     workdir=run_dir / dst_backend.name,
                     timeout=self.timeout,
                 )
@@ -289,6 +352,13 @@ class Pipeline:
                 attempt.import_seconds = imported.duration_s
                 attempt.log = imported.log or attempt.log
                 result.warnings.extend(f"import {exchange}: {w}" for w in imported.warnings)
+                self._emit(
+                    "import",
+                    exchange=exchange,
+                    ok=imported.ok,
+                    seconds=round(imported.duration_s, 2),
+                    error=imported.error,
+                )
                 if not imported.ok:
                     attempt.error = imported.error or "import failed"
                     result.attempts.append(attempt)
@@ -311,6 +381,7 @@ class Pipeline:
             candidate = self._read_native(dst_backend, dst, run_dir)
             result.candidate_ir = candidate
             result.paths["candidate_ir"] = str(ir.dump(candidate, run_dir / "ir-target.json"))
+            self._emit("target_read", app=dst_backend.name)
         except SwnxError as exc:
             result.warnings.append(f"could not read the converted part back: {exc.message}")
 
@@ -322,11 +393,18 @@ class Pipeline:
     def _import_only(self, src, dst, dst_fmt, step_variant, run_dir, result) -> None:
         dst_backend = self.registry.for_format(dst_fmt)
         imported = dst_backend.run(
-            Job("import", input=str(src), output=str(dst), format=dst_fmt),
+            Job(
+                "import",
+                input=str(src),
+                output=str(dst),
+                format=dst_fmt,
+                options=self._options({"step_variant": step_variant}),
+            ),
             workdir=run_dir / dst_backend.name,
             timeout=self.timeout,
         )
         imported.require_ok()
+        self._emit("import", exchange=src.suffix.lstrip("."), ok=True, seconds=round(imported.duration_s, 2))
         result.ok = True
         result.attempts.append(
             ConversionAttempt(exchange=src.suffix.lstrip("."), ok=True, import_ok=True, import_seconds=imported.duration_s, file=str(src), log=imported.log)
@@ -334,24 +412,27 @@ class Pipeline:
         candidate = self._read_native(dst_backend, dst, run_dir)
         result.candidate_ir = candidate
         result.paths["candidate_ir"] = str(ir.dump(candidate, run_dir / "ir-target.json"))
+        self._emit("target_read", app=dst_backend.name)
         result.warnings.append("source is an exchange format: no independent reference part, so property comparison is informational only")
 
     def _export_only(self, src, src_fmt, dst, dst_fmt, step_variant, run_dir, result) -> None:
         src_backend = self.registry.for_format(src_fmt)
         result.reference_ir = self._dump_ir(src_backend, src, run_dir, "source", result)
         result.paths["reference_ir"] = str(run_dir / "ir-source.json")
+        self._emit("source_read", app=src_backend.name)
         exported = src_backend.run(
             Job(
                 "export",
                 input=str(src),
                 output=str(dst),
                 format=dst_fmt,
-                options={"step_variant": step_variant, "export_only": True},
+                options=self._options({"step_variant": step_variant, "export_only": True}),
             ),
             workdir=run_dir / src_backend.name,
             timeout=self.timeout,
         )
         exported.require_ok()
+        self._emit("export", exchange=dst_fmt, ok=True, seconds=round(exported.duration_s, 2))
         result.ok = True
         result.attempts.append(
             ConversionAttempt(exchange=dst_fmt, ok=True, export_ok=True, export_seconds=exported.duration_s, file=str(dst), log=exported.log)
@@ -374,17 +455,21 @@ class Pipeline:
             result.verdict = "unverified"
             result.warnings.append("validation layer is not installed (src/swnx_switch/validate.py missing)")
             return
+        self._emit("validate")
         comparison = compare(result.reference_ir, result.candidate_ir, tolerances=tolerances)
         result.comparison = comparison
         result.verdict = comparison.get("verdict", "unknown")
         result.ok = result.verdict in ("pass", "warn")
+        self._emit("validated", verdict=result.verdict)
         if report:
             self._write_report(result, task=task)
 
     def _write_report(self, result: ConversionResult, *, task: str | None) -> None:
+        self._emit("report")
         meta = {
             "source": str(result.source),
             "target": str(result.target),
+            "target_sha256": result.paths.get("target_sha256"),
             "mode": f"{result.source_format} -> {result.target_format}",
             "task": task,
             "attempts": [a.as_dict() for a in result.attempts],
@@ -418,9 +503,107 @@ class Pipeline:
         elif written:
             result.paths["report_md"] = str(written)
 
+        # A copy beside the produced part: a user should not have to dig into
+        # work/<run-id>/ to find out whether the conversion was good (report P2-1).
+        target_path = result.target.resolve()
+        near_dir = self._report_dir or target_path.parent
+        near_dir.mkdir(parents=True, exist_ok=True)
+        stem = target_path.stem
+        for key, suffix in (("report_md_near", ".validation.md"), ("report_json_near", ".validation.json")):
+            source_path = result.paths.get("report_md" if suffix.endswith(".md") else "report_json")
+            if not source_path:
+                continue
+            try:
+                import shutil  # noqa: PLC0415 - only needed here
+
+                destination = near_dir / f"{stem}{suffix}"
+                shutil.copyfile(source_path, destination)
+                result.paths[key] = str(destination)
+            except OSError as exc:  # pragma: no cover - unwritable target dir
+                result.warnings.append(f"could not copy the report next to the target: {exc}")
+
+    # ------------------------------------------------------------------ #
+    # request validation / preflight
+    # ------------------------------------------------------------------ #
+    def _validate_request(self, src: Path, dst: Path, src_fmt: str, dst_fmt: str, mode: str, force: bool) -> None:
+        """Fail in milliseconds for requests that cannot possibly work.
+
+        Everything here used to surface only after both CAD applications had
+        started (report P2-2), which turns a typo into a two-minute wait.
+        """
+        if not src.exists():
+            raise SwnxError(f"source file not found: {src}")
+        if src == dst:
+            raise ConversionError("source and target are the same file", hint="choose a different target path")
+        if dst.exists() and not force:
+            raise ConversionError(f"target already exists: {dst}", hint="pass force=true / --force to overwrite")
+        if src_fmt == dst_fmt:
+            raise ConversionError(
+                f"source and target are both {src_fmt}; there is nothing to convert",
+                hint="target must be a different format (e.g. .sldprt -> .prt)",
+            )
+        if src_fmt in ("step", "parasolid") and dst_fmt in ("step", "parasolid"):
+            raise ConversionError("source and target are both exchange formats; nothing to convert")
+        if mode not in ("auto", *EXCHANGE_EXT):
+            raise ConversionError(f"unknown conversion mode {mode!r}", hint="mode: auto | step | parasolid")
+        if dst_fmt in EXCHANGE_EXT and mode != "auto" and mode != dst_fmt:
+            raise ConversionError(
+                f"mode={mode} cannot produce a .{EXCHANGE_EXT[dst_fmt].lstrip('.')} target",
+                hint=f"use mode={dst_fmt} or mode=auto",
+            )
+
+    def _preflight(self, src_fmt: str, dst_fmt: str) -> None:
+        """Ask each involved driver for a *deep* probe before doing any work.
+
+        A deep probe only reports what the driver can actually do; it is the
+        cheapest way to turn "starts, runs for 90 s, fails" into "fails in 5 s
+        with the reason" (report P0-2/P0-3).
+        """
+        from .backends.base import format_owner  # noqa: PLC0415
+
+        wanted = {format_owner(src_fmt), format_owner(dst_fmt)} - {None}
+        for name in sorted(wanted):
+            backend = self.registry.get(name)
+            if not backend.available():
+                raise SwnxError(
+                    f"preflight: {name} is not available",
+                    hint="run `swnx-switch probe --deep` for details",
+                )
+            try:
+                probe = backend.run(
+                    # keep_app: a successful deep probe should leave the instance it
+                    # started for the conversion that follows, otherwise preflight
+                    # pays for one cold start and the conversion pays for another.
+                    Job("probe", options={"deep": True, "keep_app": True}),
+                    workdir=self.workdir / f"preflight-{name}",
+                    timeout=min(self.timeout, 180.0),
+                )
+            except SwnxError as exc:
+                raise SwnxError(f"preflight: {name} is not usable: {exc.message}") from exc
+            if not probe.ok:
+                raise SwnxError(
+                    f"preflight: {name} is not usable: {probe.error}",
+                    hint=f"driver log: {probe.log}",
+                )
+            self._emit("preflight", backend=name, ok=True)
+
     # ------------------------------------------------------------------ #
     # helpers
     # ------------------------------------------------------------------ #
+    def _emit(self, stage: str, **info: Any) -> None:
+        if self._progress is None:
+            return
+        try:
+            self._progress(stage, dict(info))
+        except Exception:  # pragma: no cover - a bad callback must not break conversion
+            pass
+
+    def _options(self, extra: dict | None = None) -> dict:
+        options = dict(extra or {})
+        if self._keep_app:
+            options["keep_app"] = True
+        return options
+
     def _dump_ir(self, backend, path: Path, run_dir: Path, label: str, result: ConversionResult) -> dict:
         """Read a native part into the IR and keep the JSON next to the run."""
         doc = self._read_native(backend, path, run_dir)
@@ -454,7 +637,7 @@ def choose_exchanges(mode: str, src_fmt: str, dst_fmt: str) -> list[str]:
     keeps STEP as the fallback.  Pairs that do not involve NX still prefer STEP,
     which carries names, colours and PMI that Parasolid does not.
 
-    An explicit ``--mode`` always wins: the user asked for that format, so trying
+    An explicit ``mode`` always wins: the user asked for that format, so trying
     the other one first would be second-guessing them.
     """
     if mode == "auto":
@@ -466,12 +649,55 @@ def choose_exchanges(mode: str, src_fmt: str, dst_fmt: str) -> list[str]:
     raise ConversionError(f"unknown conversion mode {mode!r}", hint="mode: auto | step | parasolid")
 
 
-def probe_environment() -> dict:
-    """Full environment report used by ``swnx-switch probe`` and the MCP layer."""
+def probe_environment(deep: bool = False, timeout: float = 180.0) -> dict:
+    """Full environment report used by ``swnx-switch probe`` and the MCP layer.
+
+    ``deep=True`` runs a ``probe`` job in each available driver: that is the only
+    honest way to answer "can this application actually start right now" — the
+    shallow check only proves the executable and ProgID exist (report P1-3).
+
+    Backends that implement an honest tri-state (``capabilities(deep=True)``, see
+    :mod:`swnx_switch.backends.sw`) are asked directly; the others get a plain
+    ``probe`` job whose payload is attached as ``deep_probe``.
+    """
     from .paths import describe_environment  # noqa: PLC0415
 
     env = describe_environment()
-    env["backends"] = BackendRegistry().describe()
+    registry = BackendRegistry()
+    backends: list[dict] = []
+    for name in ("nx", "solidworks"):
+        try:
+            backend = registry.get(name)
+        except SwnxError as exc:  # pragma: no cover - broken install
+            backends.append({"backend": name, "available": False, "error": exc.message})
+            continue
+        info: dict | None = None
+        if deep:
+            try:
+                info = backend.capabilities(deep=True)  # type: ignore[call-arg]
+            except TypeError:
+                info = None
+        if info is None:
+            info = backend.capabilities()
+            if deep and info.get("available"):
+                try:
+                    probe = backend.run(
+                        Job("probe", options={"deep": True}),
+                        workdir=ensure_workdir() / f"probe-{name}",
+                        timeout=timeout,
+                    )
+                    info["deep_probe"] = {
+                        "ok": probe.ok,
+                        "seconds": round(probe.duration_s, 2),
+                        "error": probe.error,
+                        "log": probe.log,
+                        "payload": probe.raw.get("probe") if isinstance(probe.raw, dict) else None,
+                    }
+                except SwnxError as exc:  # pragma: no cover - driver start failure
+                    info["deep_probe"] = {"ok": False, "error": exc.message}
+        backends.append(info)
+    env["backends"] = backends
+    env["deep"] = bool(deep)
     try:
         from . import __version__
 

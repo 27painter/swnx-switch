@@ -71,11 +71,11 @@ def _parse_tolerances(pairs: list[str] | None) -> dict | None:
 # commands
 # --------------------------------------------------------------------------- #
 def cmd_probe(args: argparse.Namespace) -> int:
-    env = probe_environment()
+    env = probe_environment(deep=bool(getattr(args, "deep", False)))
     if args.json:
         _print_json(env)
         return EXIT_OK
-    print("swnx-switch 环境探测 (environment probe)")
+    print("swnx-switch 环境探测 (environment probe)" + ("  [deep]" if env.get("deep") else ""))
     print(f"  swnx-switch   {env.get('swnx_switch', __version__)}")
     print(f"  python        {env['python']['version']}  {env['python']['executable']}")
     print(f"  pywin32       {'yes' if env['pywin32'] else 'NO (SolidWorks driver will not run)'}")
@@ -92,18 +92,36 @@ def cmd_probe(args: argparse.Namespace) -> int:
     for backend in env.get("backends", []):
         state = "ok" if backend.get("available") else f"unavailable: {backend.get('error', 'not installed')}"
         print(f"  backend {backend['backend']:<12} {state}")
+        if backend.get("installed") is not None:
+            print(
+                f"    installed={backend.get('installed')} launchable={backend.get('launchable')} "
+                f"reachable={backend.get('reachable')}"
+                + (f"  last_error={backend['last_error']}" if backend.get("last_error") else "")
+            )
+        deep = backend.get("deep_probe")
+        if deep:
+            # ``deep_probe`` is either the driver report {ok,seconds,error} or, for
+            # backends with an honest tri-state, the connectivity block which nests
+            # the report under "deep_probe".
+            report = deep.get("deep_probe") if isinstance(deep.get("deep_probe"), dict) else deep
+            print(
+                f"    deep_probe ok={report.get('ok')} {report.get('seconds')}s"
+                + (f"  {report.get('error')}" if report.get("error") else "")
+            )
     print(f"  workdir       {env['workdir']}")
+    if not env.get("deep"):
+        print("  提示: 需要确认 CAD 现在真的能启动，用 `probe --deep`（会实际尝试启动/连接一次）。")
     return EXIT_OK
 
 
 def cmd_read(args: argparse.Namespace) -> int:
     pipeline = Pipeline(workdir=args.workdir, outdir=args.outdir, timeout=args.timeout)
-    doc = pipeline.read(args.file, via=args.via)
+    doc = pipeline.read(args.file, via=args.via, keep_app=bool(getattr(args, "keep_app", False)))
     out = Path(args.out) if args.out else Path(args.outdir or pipeline.outdir) / f"{Path(args.file).stem}.ir.json"
     ir.dump(doc, out)
     summary = ir.summarize(doc)
     if args.json:
-        _print_json({"ok": True, "ir_path": str(out), "summary": summary, "ir": doc})
+        _print_json({"ok": True, "ir_path": str(out), "summary": summary})
     else:
         print(f"已读取 (read) {args.file}")
         print(f"  IR          {out}")
@@ -113,6 +131,11 @@ def cmd_read(args: argparse.Namespace) -> int:
 
 def cmd_convert(args: argparse.Namespace) -> int:
     pipeline = Pipeline(workdir=args.workdir, outdir=args.outdir, timeout=args.timeout)
+
+    def progress(stage: str, info: dict) -> None:
+        detail = ", ".join(f"{key}={value}" for key, value in info.items() if value is not None)
+        print(f"  [{stage}] {detail}".rstrip(), file=sys.stderr, flush=True)
+
     result = pipeline.convert(
         args.source,
         args.target,
@@ -122,11 +145,16 @@ def cmd_convert(args: argparse.Namespace) -> int:
         keep_intermediate=not args.drop_intermediate,
         tolerances=_parse_tolerances(args.tolerance),
         report=not args.no_report,
+        keep_app=bool(getattr(args, "keep_app", False)),
+        preflight=bool(getattr(args, "preflight", False)),
+        report_dir=getattr(args, "report_dir", None),
+        progress=progress,
     )
     payload = result.summary()
     if args.json:
         _print_json(payload)
     else:
+        print("预期差异：几何 1:1 一致；参数化特征树/草图不保留（跨内核固有限制，不是转换失败）。")
         print(f"转换 (convert) {result.source_format} -> {result.target_format}")
         print(f"  源 source   {result.source}")
         print(f"  目标 target {result.target}")
@@ -142,8 +170,9 @@ def cmd_convert(args: argparse.Namespace) -> int:
             _print_comparison(result.comparison)
         for warning in result.warnings:
             print(f"  warning: {warning}")
-        if result.paths.get("report_md"):
-            print(f"  报告 report  {result.paths['report_md']}")
+        report_path = result.paths.get("report_md_near") or result.paths.get("report_md")
+        if report_path:
+            print(f"  报告 report  {report_path}")
         elif result.paths.get("report_json"):
             print(f"  报告 report  {result.paths['report_json']}")
         if result.error:
@@ -261,12 +290,14 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_probe = sub.add_parser("probe", help="探测本机 NX/SolidWorks 环境")
     p_probe.add_argument("--json", action="store_true")
+    p_probe.add_argument("--deep", action="store_true", help="深度探测：实际尝试启动/连接一次 CAD（5-20 秒）")
     p_probe.set_defaults(func=cmd_probe)
 
     p_read = sub.add_parser("read", help="读取零件 -> 中性 IR JSON")
     p_read.add_argument("file")
     p_read.add_argument("--out", help="IR 输出路径")
     p_read.add_argument("--via", choices=["nx", "solidworks"], help="读取 STEP/Parasolid 时用哪个应用导入")
+    p_read.add_argument("--keep-app", action="store_true", help="读完后保持 CAD 运行，供后续作业复用")
     p_read.add_argument("--json", action="store_true")
     common(p_read)
     p_read.set_defaults(func=cmd_read)
@@ -274,12 +305,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_convert = sub.add_parser("convert", help="在 .sldprt / .prt / .step / .x_t 之间转换并校验")
     p_convert.add_argument("source")
     p_convert.add_argument("target")
-    p_convert.add_argument("--mode", choices=["auto", "step", "parasolid"], default="auto", help="中间格式 (default auto: 先 STEP 后 Parasolid)")
+    p_convert.add_argument(
+        "--mode",
+        choices=["auto", "step", "parasolid"],
+        default="auto",
+        help="中间格式 (default auto: 经过 NX 的路线优先 Parasolid，其余优先 STEP)",
+    )
     p_convert.add_argument("--step-variant", choices=["ap203", "ap214", "ap242"], default="ap242")
     p_convert.add_argument("--force", action="store_true", help="覆盖已存在的目标文件")
     p_convert.add_argument("--no-report", action="store_true", help="不生成 Markdown 报告")
+    p_convert.add_argument("--report-dir", help="报告副本目录（默认放目标文件旁边）")
     p_convert.add_argument("--drop-intermediate", action="store_true", help="转换成功后删除中间 STEP/Parasolid")
     p_convert.add_argument("--tolerance", action="append", metavar="KEY=VALUE", help="覆盖容差，如 --tolerance volume=2e-3")
+    p_convert.add_argument("--keep-app", action="store_true", help="转换结束后保持 SolidWorks 运行，供下一次转换复用（避免反复冷启动）")
+    p_convert.add_argument("--preflight", action="store_true", help="开始前深度探测一次，环境不可用时快速失败")
     p_convert.add_argument("--json", action="store_true")
     common(p_convert)
     p_convert.set_defaults(func=cmd_convert)

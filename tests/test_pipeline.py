@@ -82,8 +82,8 @@ def test_verify_wires_validate_and_report() -> None:
 
     result = ConversionResult(
         ok=True,
-        source=Path("a.sldprt"),
-        target=Path("a.prt"),
+        source=run_dir / "a.sldprt",
+        target=run_dir / "a.prt",
         source_format="sldprt",
         target_format="prt",
         run_dir=run_dir,
@@ -112,8 +112,8 @@ def test_verify_passes_a_clean_conversion() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     result = ConversionResult(
         ok=True,
-        source=Path("a.sldprt"),
-        target=Path("a.prt"),
+        source=run_dir / "a.sldprt",
+        target=run_dir / "a.prt",
         source_format="sldprt",
         target_format="prt",
         run_dir=run_dir,
@@ -134,6 +134,115 @@ def test_ir_roundtrip_through_pipeline_scratch() -> None:
     loaded = ir.load(path)
     assert loaded["schema"] == ir.SCHEMA
     assert ir.summarize(loaded)["bodies"] >= 1
+
+
+def test_request_validation_rejects_impossible_requests() -> None:
+    """Bad requests must fail before any CAD process starts (report P2-2)."""
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    pipeline = Pipeline(workdir=SCRATCH / "work-validate", outdir=SCRATCH / "out-validate")
+    src = SCRATCH / "source.SLDPRT"
+    src.write_bytes(b"placeholder")
+    other_sldprt = SCRATCH / "other.SLDPRT"
+    existing = SCRATCH / "already.prt"
+    existing.write_bytes(b"x")
+    a_step = SCRATCH / "a.step"
+    a_step.write_bytes(b"ISO-10303-21;")
+    b_step = SCRATCH / "b.step"
+
+    cases = [
+        ((src, src, "sldprt", "sldprt", "auto", False), "same file"),
+        ((src, existing, "sldprt", "prt", "auto", False), "already exists"),
+        ((src, other_sldprt, "sldprt", "sldprt", "auto", False), "both sldprt"),
+        ((a_step, b_step, "step", "step", "auto", False), "both step"),
+        ((a_step, Path("c.x_t"), "step", "parasolid", "auto", False), "both exchange formats"),
+        ((src, Path("c.x_t"), "sldprt", "parasolid", "step", False), "cannot produce"),
+        ((src, Path("c.prt"), "sldprt", "prt", "dwg", False), "unknown conversion mode"),
+    ]
+    for args, needle in cases:
+        try:
+            pipeline._validate_request(*args)
+        except SwnxError as exc:
+            assert needle in exc.message, (needle, exc.message)
+        else:
+            raise AssertionError(f"{args} should have been rejected with {needle!r}")
+
+
+def test_report_is_copied_next_to_the_target() -> None:
+    """The user must find validation.md beside the part, not only under work/ (P2-1)."""
+    from swnx_switch.validate import compare
+
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    pipeline = Pipeline(workdir=SCRATCH / "work-report", outdir=SCRATCH / "out-report")
+    run_dir = SCRATCH / "run-report"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    deliver = SCRATCH / "deliver"
+    target = deliver / "switch_test.prt"
+
+    reference = _fixture("ref_part.json")
+    comparison = compare(reference, _fixture("candidate_identical.json"))
+    result = ConversionResult(
+        ok=True,
+        source=SCRATCH / "source.SLDPRT",
+        target=target,
+        source_format="sldprt",
+        target_format="prt",
+        run_dir=run_dir,
+        comparison=comparison,
+        verdict=comparison["verdict"],
+    )
+    pipeline._write_report(result, task="unit-test")
+
+    assert (deliver / "switch_test.validation.md").exists(), "Markdown copy missing beside target"
+    assert (deliver / "switch_test.validation.json").exists(), "JSON copy missing beside target"
+    assert result.paths["report_md_near"].endswith("switch_test.validation.md")
+    assert Path(result.paths["report_md"]).exists()
+
+
+def test_progress_callback_and_keep_app_options() -> None:
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    pipeline = Pipeline(workdir=SCRATCH / "work-progress", outdir=SCRATCH / "out-progress")
+    events: list[tuple[str, dict]] = []
+    pipeline._progress = lambda stage, info: events.append((stage, info))
+    pipeline._emit("source_read", app="solidworks")
+    pipeline._emit("export", exchange="parasolid", ok=True)
+    assert [stage for stage, _ in events] == ["source_read", "export"]
+    assert events[0][1] == {"app": "solidworks"}
+
+    pipeline._progress = None
+    pipeline._emit("ignored")
+    assert len(events) == 2, "no callback means no work"
+
+    assert pipeline._options() == {}
+    pipeline._keep_app = True
+    assert pipeline._options({"step_variant": "ap242"}) == {"step_variant": "ap242", "keep_app": True}
+
+
+def test_probe_environment_is_shallow_by_default() -> None:
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    env = __import__("swnx_switch.pipeline", fromlist=["probe_environment"]).probe_environment(deep=False)
+    assert env["deep"] is False
+    assert isinstance(env["backends"], list) and env["backends"]
+
+
+def test_metadata_only_mismatch_is_warn_not_fail() -> None:
+    """Density is material metadata: a mismatch must not fail an exact B-Rep.
+
+    Real case (2026-11-14): a SolidWorks session exported density 1 instead of
+    1000, so NX mass came out 1000x smaller while every geometry check passed.
+    Reporting that as ``fail`` would have hidden a perfect geometry conversion.
+    """
+    from swnx_switch.validate import compare
+
+    reference = _fixture("ref_part.json")
+    candidate = _fixture("candidate_identical.json")
+    candidate["model"]["mass_properties"]["mass_kg"] = 0.00046173637094563085
+    candidate["model"]["mass_properties"]["density_kg_m3"] = 1.0
+    comparison = compare(reference, candidate)
+    assert comparison["verdict"] == "warn", comparison["verdict_basis"]
+    checks = {check["id"]: check for check in comparison["checks"]}
+    assert checks["volume"]["status"] == "pass"
+    assert checks["mass"]["status"] == "fail"
+    assert comparison["summary"]["failed_optional"]
 
 
 if __name__ == "__main__":  # pragma: no cover

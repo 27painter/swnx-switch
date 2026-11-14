@@ -23,6 +23,9 @@ D:\27painter\Documents\swnx-switch\swnx-switch.cmd probe
 看两个 backend 是否 `available=true`：
 
 - `available=false` → 停下来，把 hint 转告用户（NX 需 `NX_HOME`，SolidWorks 需 `SWNX_SLDPRT_EXE`）。
+- **`available=true` 只证明 exe 与 ProgID 存在，不证明现在能启动**。用户报过"probe 说可用、
+  实际 SW 起不来"：要确认可运行，用 `swnx_probe {"deep": true}` 或 `probe --deep`
+  （5–20 秒，会真的启动/连接一次），看 `launchable` / `reachable` / `last_error`。
 - 在 DSH 沙箱里，启动 SW COM / NX 批处理需要 **danger-full-access**（许可和用户配置在工作区外）。
   命令被沙箱拒绝时按这个解释，不要反复重试同一条。
 - 普通终端里直接跑 CLI 没有这层限制。
@@ -33,9 +36,14 @@ D:\27painter\Documents\swnx-switch\swnx-switch.cmd probe
    - MCP：`swnx_read_part {"path": "..."}`
    - CLI：`swnx-switch.cmd read "<file>" --out out\a.ir.json`
    - 得到 `*.ir.json`（中性模型）+ 中文零件简报（体积/面积/包围盒/质心/实体/特征树/曲面摘要/自定义属性）。
-2. **转换**：
-   - MCP：`swnx_convert_part {"source": "<a.sldprt>", "target": "<a.prt>"}`
-   - CLI：`swnx-switch.cmd convert "<源码件>" "<目标件>"`
+   - 返回值里只有摘要；IR 全文在 `ir_path` 指向的文件里，需要细节时读文件，别要求工具回传全文。
+2. **转换**（长任务优先用异步两段式）：
+   - MCP 异步（推荐）：`swnx_convert_start {"source": "<a.sldprt>", "target": "<a.prt>"}`
+     拿到 `job_id` 后轮询 `swnx_job_status {"job_id": "..."}`。
+     阶段依次是 `source_read → export → import → target_read → validate → report`，
+     每 5–10 秒查一次即可，**不要对同一个转换重复 start**。
+   - MCP 同步（短任务/客户端不支持轮询）：`swnx_convert_part {...}`。
+   - CLI：`swnx-switch.cmd convert "<源码件>" "<目标件>"`（阶段会打到 stderr）。
    - 默认 `--mode auto`：经过 NX 的路线优先 Parasolid `.x_t`（本机 NX 批处理 STEP 翻译器不可用）。
 3. **判读结论**（见 §4），把 pass/warn/fail、关键数字和报告路径给用户。
 4. 需要复核时用 `swnx_compare_parts`（两个 IR 或两个原生件）。
@@ -52,6 +60,9 @@ D:\27painter\Documents\swnx-switch\swnx-switch.cmd probe
 | 放宽/收紧容差 | `--tolerance volume=2e-3 --tolerance bbox_abs=0.1`（短名会映射到规范键） |
 | 只要中间格式 | 目标写 `.step` / `.x_t`，等价于"导出" |
 | 只要读数据 | `read`，不要 convert |
+| 连续转换多个零件 | 加 `keep_app=true` / `--keep-app`，复用同一个 SolidWorks 实例，避免反复冷启动 |
+| 先确认环境能跑再转 | `preflight=true` / `--preflight`，环境不可用时几秒内失败 |
+| 报告放哪 | 默认写在目标文件旁 `<目标名>.validation.md`；可用 `--report-dir` 改 |
 | 装配/工程图 | 能读能导，转换只标 `warn`，不要承诺语义正确 |
 
 ## 4. 结论怎么判读
@@ -61,7 +72,7 @@ D:\27painter\Documents\swnx-switch\swnx-switch.cmd probe
 | 结论 | 含义 | 该怎么说 |
 |---|---|---|
 | `pass` | 所有必需检查通过 | 可以说"转换成功，几何在容差内一致" |
-| `warn` | 只有可选/信息项异常（常见：特征树丢失、面数轻微变化） | 可以说"几何一致；参数化特征未保留" |
+| `warn` | 只有可选/信息项异常：特征树丢失、面数变化，或**材质密度这类元数据**不匹配（几何必需项仍全过） | 可以说"几何一致；参数化特征/材质元数据未保留" |
 | `fail` | 任一必需项失败或无法确认 | 不能说成功；给出失败项 + 日志路径 |
 | `unverified` | 源是中间格式，没有独立参照 | 只报告目标件的属性，不做一致性声明 |
 

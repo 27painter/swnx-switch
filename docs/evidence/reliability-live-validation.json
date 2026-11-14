@@ -1,0 +1,409 @@
+{
+  "schema": "swnx.report/1",
+  "generated_at": "2026-11-14T14:09:16+08:00",
+  "meta": {
+    "source": "D:\\27painter\\Documents\\swnx-switch\\work\\verify\\src_part.SLDPRT",
+    "target": "D:\\27painter\\Documents\\swnx-switch\\work\\verify\\live1.prt",
+    "target_sha256": "341d466543b8a6c49dd0e8a36f57457397463d84a2a828110b8464f20bf2f670",
+    "mode": "sldprt -> prt",
+    "task": null,
+    "attempts": [
+      {
+        "exchange": "parasolid",
+        "ok": true,
+        "export_ok": true,
+        "import_ok": true,
+        "export_seconds": 1.61,
+        "import_seconds": 9.81,
+        "file": "D:\\27painter\\Documents\\swnx-switch\\work\\convert-sldprt-to-prt-20261114-140840-7acc8c\\exchange-parasolid.x_t",
+        "error": null,
+        "log": "D:\\27painter\\Documents\\swnx-switch\\work\\convert-sldprt-to-prt-20261114-140840-7acc8c\\nx\\log-import-50d3311a.txt"
+      }
+    ],
+    "warnings": [],
+    "run_dir": "D:\\27painter\\Documents\\swnx-switch\\work\\convert-sldprt-to-prt-20261114-140840-7acc8c",
+    "seconds": 35.39,
+    "json_path": "D:\\27painter\\Documents\\swnx-switch\\work\\convert-sldprt-to-prt-20261114-140840-7acc8c\\validation.json"
+  },
+  "comparison": {
+    "schema": "swnx.compare/1",
+    "generated_at": "2026-11-14T14:09:16+08:00",
+    "verdict": "warn",
+    "checks": [
+      {
+        "id": "ir_schema",
+        "label": "IR 结构 (schema)",
+        "status": "pass",
+        "detail": "两份文档均通过 swnx.ir/1 结构校验",
+        "expected": null,
+        "actual": null,
+        "delta": null,
+        "tolerance": null,
+        "unit": "",
+        "severity": "optional"
+      },
+      {
+        "id": "units",
+        "label": "单位 (units)",
+        "status": "pass",
+        "detail": "两侧单位均为 mm",
+        "expected": "mm",
+        "actual": "mm",
+        "delta": null,
+        "tolerance": null,
+        "unit": "",
+        "severity": "required"
+      },
+      {
+        "id": "body_count",
+        "label": "实体数量 (bodies)",
+        "status": "pass",
+        "detail": "实体数量一致（1）",
+        "expected": 1.0,
+        "actual": 1.0,
+        "delta": 0.0,
+        "tolerance": 0.0,
+        "unit": "",
+        "severity": "required",
+        "expected_types": {
+          "solid": 1.0
+        },
+        "actual_types": {
+          "solid": 1.0
+        }
+      },
+      {
+        "id": "volume",
+        "label": "体积 (volume)",
+        "status": "pass",
+        "detail": "实测 461736，期望 461736 mm3；偏差 -3.69153e-07 mm3，容差 ±461.736 mm3（相对偏差 -0.000%）",
+        "expected": 461736.370946,
+        "actual": 461736.370945631,
+        "delta": -3.69e-07,
+        "tolerance": 461.736370946,
+        "unit": "mm3",
+        "severity": "required",
+        "delta_rel": -0.0,
+        "tolerance_rel": 0.001
+      },
+      {
+        "id": "surface_area",
+        "label": "表面积 (area)",
+        "status": "pass",
+        "detail": "实测 87883.3，期望 87883.3 mm2；偏差 -4.68877e-07 mm2，容差 ±175.767 mm2（相对偏差 -0.000%）",
+        "expected": 87883.276607,
+        "actual": 87883.276606531,
+        "delta": -4.69e-07,
+        "tolerance": 175.766553214,
+        "unit": "mm2",
+        "severity": "required",
+        "delta_rel": -0.0,
+        "tolerance_rel": 0.002
+      },
+      {
+        "id": "bbox_x",
+        "label": "包围盒 X (bbox x)",
+        "status": "pass",
+        "detail": "实测 188.5，期望 188.5 mm；偏差 0 mm，容差 ±0.1885 mm（相对偏差 +0.000%）",
+        "expected": 188.5,
+        "actual": 188.5,
+        "delta": 0.0,
+        "tolerance": 0.1885,
+        "unit": "mm",
+        "severity": "required",
+        "delta_rel": 0.0,
+        "tolerance_rel": 0.001
+      },
+      {
+        "id": "bbox_y",
+        "label": "包围盒 Y (bbox y)",
+        "status": "pass",
+        "detail": "实测 80，期望 80 mm；偏差 0 mm，容差 ±0.08 mm（相对偏差 +0.000%）",
+        "expected": 80.0,
+        "actual": 80.0,
+        "delta": 0.0,
+        "tolerance": 0.08,
+        "unit": "mm",
+        "severity": "required",
+        "delta_rel": 0.0,
+        "tolerance_rel": 0.001
+      },
+      {
+        "id": "bbox_z",
+        "label": "包围盒 Z (bbox z)",
+        "status": "pass",
+        "detail": "实测 110，期望 110 mm；偏差 0 mm，容差 ±0.11 mm（相对偏差 +0.000%）",
+        "expected": 110.0,
+        "actual": 110.0,
+        "delta": 0.0,
+        "tolerance": 0.11,
+        "unit": "mm",
+        "severity": "required",
+        "delta_rel": 0.0,
+        "tolerance_rel": 0.001
+      },
+      {
+        "id": "bbox_corner",
+        "label": "包围盒角点 (corners)",
+        "status": "pass",
+        "detail": "最大角点偏差 0 mm，容差 ±0.232448 mm；整体平移或放置变化会体现在这里（仅提示）",
+        "expected": 0.0,
+        "actual": 0.0,
+        "delta": 0.0,
+        "tolerance": 0.232448381367,
+        "unit": "mm",
+        "severity": "optional",
+        "max_corner_mm": 0.0,
+        "diagonal_mm": 232.448381367
+      },
+      {
+        "id": "centroid",
+        "label": "质心 (centroid)",
+        "status": "pass",
+        "detail": "质心偏差 9.86154e-08 mm，容差 ±0.05 mm",
+        "expected": [
+          26.304407,
+          -0.193964,
+          -0.0
+        ],
+        "actual": [
+          26.304407011,
+          -0.193963902,
+          -0.0
+        ],
+        "delta": 9.9e-08,
+        "tolerance": 0.05,
+        "unit": "mm",
+        "severity": "optional"
+      },
+      {
+        "id": "mass",
+        "label": "质量 (mass)",
+        "status": "fail",
+        "detail": "实测 0.000461736，期望 0.461736 kg；偏差 -0.461275 kg，容差 ±0.000461736 kg（相对偏差 -99.900%）；质量差异超出容差：可能是体积或密度读取错误",
+        "expected": 0.461736371,
+        "actual": 0.000461736,
+        "delta": -0.461274635,
+        "tolerance": 0.000461736371,
+        "unit": "kg",
+        "severity": "optional",
+        "delta_rel": -0.999,
+        "tolerance_rel": 0.001
+      },
+      {
+        "id": "density",
+        "label": "密度 (density)",
+        "status": "fail",
+        "detail": "实测 1，期望 1000 kg/m3，容差 ±0.001 kg/m3；密度是材质元数据，交换格式可能不保留（几何不受影响，按 warning 处理）",
+        "expected": 1000.0,
+        "actual": 1.0,
+        "delta": -999.0,
+        "tolerance": 0.001,
+        "unit": "kg/m3",
+        "severity": "optional"
+      },
+      {
+        "id": "mass_density",
+        "label": "质量一致 (mass/density)",
+        "status": "pass",
+        "detail": "转换件质量 0.000461736 kg，体积×密度推算 0.000461736 kg；偏差 -5.42101e-20 kg（容差 ±4.61736e-07 kg）",
+        "expected": 0.000461736,
+        "actual": 0.000461736,
+        "delta": -0.0,
+        "tolerance": 4.61736e-07,
+        "unit": "kg",
+        "severity": "optional",
+        "checked_side": "转换件"
+      },
+      {
+        "id": "topology",
+        "label": "面/边计数 (faces/edges)",
+        "status": "pass",
+        "detail": "面 25 -> 25（Δ+0），边 45 -> 45（Δ+0）；STEP 可能重排/切分面，仅作信息参考",
+        "expected": {
+          "faces": 25.0,
+          "edges": 45.0
+        },
+        "actual": {
+          "faces": 25.0,
+          "edges": 45.0
+        },
+        "delta": 0.0,
+        "tolerance": 0.0,
+        "unit": "count",
+        "severity": "info",
+        "face_delta": 0.0,
+        "edge_delta": 0.0
+      },
+      {
+        "id": "feature_tree",
+        "label": "特征树 (features)",
+        "status": "warn",
+        "detail": "特征树差异：丢失 45 个: 收藏、历史记录、选择集、传感器、设计活页夹、注解、注释、注释区域1 ...；新增 2 个: Datum Coordinate System(0)、Body(1)（参数化特征无法通过 STEP/Parasolid 保留，仅信息）",
+        "expected": {
+          "count": 45.0,
+          "names": [
+            "收藏",
+            "历史记录",
+            "选择集",
+            "传感器",
+            "设计活页夹",
+            "注解",
+            "注释",
+            "注释区域1",
+            "注释1___EndTag___",
+            "标注"
+          ]
+        },
+        "actual": {
+          "count": 2.0,
+          "names": [
+            "Datum Coordinate System(0)",
+            "Body(1)"
+          ]
+        },
+        "delta": 45.0,
+        "tolerance": 0.0,
+        "unit": "",
+        "severity": "info",
+        "lost": [
+          "收藏",
+          "历史记录",
+          "选择集",
+          "传感器",
+          "设计活页夹",
+          "注解",
+          "注释",
+          "注释区域1",
+          "注释1___EndTag___",
+          "标注",
+          "光源与相机",
+          "环境光源",
+          "线光源 1",
+          "线光源 2",
+          "线光源 3",
+          "线光源 4",
+          "实体",
+          "曲面实体",
+          "备注",
+          "方程式"
+        ],
+        "added": [
+          "Datum Coordinate System(0)",
+          "Body(1)"
+        ],
+        "type_changed": []
+      }
+    ],
+    "summary": {
+      "checks": 15,
+      "pass": 12,
+      "warn": 1,
+      "fail": 2,
+      "unavailable": 0,
+      "required_unavailable": [],
+      "failed": [
+        "mass",
+        "density"
+      ],
+      "failed_optional": [
+        "mass",
+        "density"
+      ],
+      "warned": [],
+      "informational": [
+        "feature_tree"
+      ],
+      "verdict_basis": "元数据项不匹配（几何不受影响）: mass, density"
+    },
+    "tolerances": {
+      "volume_rel": 0.001,
+      "volume_abs_mm3": 0.001,
+      "area_rel": 0.002,
+      "area_abs_mm2": 0.001,
+      "bbox_abs_mm": 0.05,
+      "bbox_rel": 0.001,
+      "bbox_corner_abs_mm": 0.1,
+      "centroid_abs_mm": 0.05,
+      "mass_rel": 0.001,
+      "mass_abs_kg": 1e-09,
+      "density_rel": 1e-06
+    },
+    "source": {
+      "role": "reference",
+      "path": "D:\\27painter\\Documents\\swnx-switch\\work\\verify\\src_part.SLDPRT",
+      "format": "sldprt",
+      "sha256": "98709039c5204a8510fb107ce6a2a865883f73b155a1bd221ad899ff7d90165e",
+      "app": "SolidWorks 2025",
+      "app_version": "33.5.0",
+      "name": "src_part",
+      "kind": "part",
+      "units": "mm",
+      "generated_at": "2026-11-14T14:08:52+08:00",
+      "generator": {
+        "name": "swnx-switch",
+        "version": "0.2.0",
+        "backend": "solidworks"
+      },
+      "bodies": 1,
+      "solid_bodies": 1,
+      "features": 45,
+      "volume_mm3": 461736.370946,
+      "surface_area_mm2": 87883.276607,
+      "mass_kg": 0.4617363709456308,
+      "density_kg_m3": 1000.0,
+      "material": null,
+      "bbox_size_mm": [
+        188.5,
+        80.0,
+        110.0
+      ],
+      "warnings": [],
+      "limits": []
+    },
+    "candidate": {
+      "role": "candidate",
+      "path": "D:\\27painter\\Documents\\swnx-switch\\work\\verify\\live1.prt",
+      "format": "prt",
+      "sha256": "341d466543b8a6c49dd0e8a36f57457397463d84a2a828110b8464f20bf2f670",
+      "app": "Siemens NX",
+      "app_version": "2406",
+      "name": "live1",
+      "kind": "part",
+      "units": "mm",
+      "generated_at": "2026-11-14T14:09:15+08:00",
+      "generator": {
+        "name": "swnx-switch",
+        "version": "0.2.0",
+        "backend": "nx"
+      },
+      "bodies": 1,
+      "solid_bodies": 1,
+      "features": 2,
+      "volume_mm3": 461736.3709456308,
+      "surface_area_mm2": 87883.27660653113,
+      "mass_kg": 0.0004617363709456309,
+      "density_kg_m3": 1.0000000000000002,
+      "material": null,
+      "bbox_size_mm": [
+        188.5,
+        80.0,
+        110.0
+      ],
+      "warnings": [],
+      "limits": [
+        "NX configurations / part families are not exposed by NXOpen BasePart; not extracted",
+        "moments of inertia are not exposed by MeasureBodies; not extracted"
+      ]
+    },
+    "warnings": [],
+    "limitations": [
+      "验证基于 IR 中的质量属性 (mass properties)、包围盒 (bounding box)、实体数量与特征树；IR 未提供的字段标记为 unavailable，不做推测。",
+      "STEP/Parasolid 交换的是 B-Rep 几何，参数化特征树 (feature tree) 无法保留；特征差异仅作信息记录，不参与结论。",
+      "面/边计数 (face/edge counts) 可能因 STEP 导出重排或切分面而变化，仅作信息记录。",
+      "本报告不检查 PMI/标注、装配约束、颜色与外观。",
+      "转换件驱动限制: NX configurations / part families are not exposed by NXOpen BasePart; not extracted",
+      "转换件驱动限制: moments of inertia are not exposed by MeasureBodies; not extracted"
+    ]
+  }
+}

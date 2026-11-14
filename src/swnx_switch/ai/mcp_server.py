@@ -18,6 +18,7 @@ import traceback
 from typing import Any
 
 from .. import __version__
+from . import wire
 from .tools import TOOLS, call_tool
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -30,7 +31,22 @@ def _log(message: str) -> None:
 
 
 def _send(payload: dict) -> None:
-    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    """Write one protocol line; never emit a bare NaN/Infinity token.
+
+    The host validates tool results with a lossless-JSON parser, and a single
+    non-finite number used to turn a successful conversion into "invalid output"
+    (user report P0-1).  ``wire.dumps`` enforces ``allow_nan=False`` and
+    sanitises as a fallback, so a bad value degrades to ``null`` instead of
+    breaking the call.
+    """
+    try:
+        line = wire.dumps(payload)
+    except Exception:  # pragma: no cover - last-resort guard
+        line = json.dumps(
+            {"jsonrpc": "2.0", "id": payload.get("id"), "error": {"code": -32603, "message": "unserialisable response"}},
+            ensure_ascii=False,
+        )
+    sys.stdout.write(line + "\n")
     sys.stdout.flush()
 
 
@@ -61,8 +77,10 @@ def handle(request: dict, context: dict) -> dict | None:
                 "serverInfo": {"name": "swnx-switch", "version": __version__},
                 "instructions": (
                     "swnx-switch 读取 SolidWorks/NX 零件为中立模型并互转格式。"
-                    "先调用 swnx_probe 确认环境；转换前用 swnx_read_part 看零件摘要；"
-                    "swnx_convert_part 是长任务（1-5 分钟），不要重复发起同一转换。"
+                    "先调用 swnx_probe 确认环境（deep=true 会真的试启动一次）；"
+                    "转换前用 swnx_read_part 看零件摘要；"
+                    "长转换用 swnx_convert_start + swnx_job_status 轮询（能看到 stage 与耗时），"
+                    "不要把同一个转换重复发起。"
                 ),
             },
         )
@@ -80,7 +98,9 @@ def handle(request: dict, context: dict) -> dict | None:
         content = [{"type": "text", "text": outcome.get("text") or ""}]
         result: dict[str, Any] = {"content": content, "isError": bool(outcome.get("isError"))}
         if isinstance(outcome.get("data"), dict):
-            result["structuredContent"] = outcome["data"]
+            # Sanitised again here: a handler may embed a value from a driver
+            # payload that this module never saw.
+            result["structuredContent"] = wire.sanitize(outcome["data"])
         return _result(request_id, result)
     if method in ("resources/list", "prompts/list", "logging/setLevel"):
         if method == "resources/list":

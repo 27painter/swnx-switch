@@ -687,6 +687,8 @@ def _check_density(reference: dict, candidate: dict, tol: Mapping[str, float]) -
     status = "pass" if abs(delta) <= tolerance else "fail"
     ref_material, cand_material = _material_name(reference), _material_name(candidate)
     detail = f"实测 {_g(cand_density)}，期望 {_g(ref_density)} kg/m3，容差 ±{_g(tolerance)} kg/m3"
+    if status == "fail":
+        detail += "；密度是材质元数据，交换格式可能不保留（几何不受影响，按 warning 处理）"
     if ref_material != cand_material:
         detail += f"；材料名 {ref_material or '-'} -> {cand_material or '-'}"
     return _check(
@@ -955,9 +957,15 @@ def verdict_of(result: dict) -> str:
 
     Rules (documented because the pipeline's behaviour depends on them):
 
-    * any check ``fail`` -> ``fail``;
-    * a ``required`` check that is ``unavailable`` -> ``fail`` (cannot verify
-      is not verified);
+    * a ``required`` check that is ``fail`` -> ``fail`` (geometry is wrong);
+    * an ``optional`` check that is ``fail`` -> ``warn``: mass/density come from
+      *material metadata*, which an exchange format may not carry (a real
+      SolidWorks session exported density 1 instead of 1000 while the geometry
+      was exact).  Losing metadata is worth reporting, but it must not fail an
+      otherwise perfect B-Rep conversion.  A unit bug still fails: it shows up in
+      the required volume/area/bounding-box checks as well;
+    * a ``required`` check that is ``unavailable`` -> ``fail`` (cannot verify is
+      not verified);
     * a ``warn`` on a ``required`` or ``optional`` check -> ``warn``;
     * ``info``-severity checks never change the verdict;
     * no checks at all -> ``fail``.
@@ -970,12 +978,12 @@ def verdict_of(result: dict) -> str:
         return "fail"
     if any(check.get("status") not in STATUSES or check.get("severity") not in SEVERITIES for check in entries):
         return "fail"
-    if any(check.get("status") == "fail" for check in entries):
+    if any(check.get("status") == "fail" and check.get("severity") == "required" for check in entries):
         return "fail"
     if any(check.get("severity") == "required" and check.get("status") == "unavailable" for check in entries):
         return "fail"
     if any(
-        check.get("status") == "warn" and check.get("severity") in ("required", "optional")
+        check.get("status") in ("warn", "fail") and check.get("severity") in ("required", "optional")
         for check in entries
     ):
         return "warn"
@@ -992,6 +1000,11 @@ def _summarise(checks: list[dict], verdict: str) -> dict:
         check["id"] for check in checks if check.get("severity") == "required" and check.get("status") == "unavailable"
     ]
     failed = [check["id"] for check in checks if check.get("status") == "fail"]
+    failed_optional = [
+        check["id"]
+        for check in checks
+        if check.get("status") == "fail" and check.get("severity") == "optional"
+    ]
     warned = [
         check["id"]
         for check in checks
@@ -1007,7 +1020,12 @@ def _summarise(checks: list[dict], verdict: str) -> dict:
         if informational:
             basis += "；信息性差异: " + ", ".join(informational) + "（不影响结论）"
     elif verdict == "warn":
-        basis = "无失败项，但存在警告: " + ", ".join(warned)
+        parts = []
+        if warned:
+            parts.append("警告: " + ", ".join(warned))
+        if failed_optional:
+            parts.append("元数据项不匹配（几何不受影响）: " + ", ".join(failed_optional))
+        basis = "；".join(parts) or "存在警告"
     else:
         reasons = []
         if failed:
@@ -1020,6 +1038,7 @@ def _summarise(checks: list[dict], verdict: str) -> dict:
         **counts,
         "required_unavailable": required_unavailable,
         "failed": failed,
+        "failed_optional": failed_optional,
         "warned": warned,
         "informational": informational,
         "verdict_basis": basis,

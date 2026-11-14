@@ -46,7 +46,7 @@ conversion, returning a `pass` / `warn` / `fail` verdict**.
 | Convert `.sldprt` ⇄ `.prt` with geometry agreeing to ~1e-9 | Translate features (e.g. rebuild an Extrude as an Extrude) |
 | Import/export `.step` / `.x_t` and turn them into native parts | Convert assemblies semantically; carry full drawing annotations/PMI |
 | Run 15 tolerance checks and produce a bilingual report after every conversion | Parse native binary formats, bypass CAD licences, or work without the apps installed |
-| Expose 6 tools over MCP to any AI client | Act as a GUI modeller (it ships a double-click menu, not a CAD UI) |
+| Expose 8 tools over MCP to any AI client (including async jobs) | Act as a GUI modeller (it ships a double-click menu, not a CAD UI) |
 
 **Design trade-off**: instead of guessing features (unreliable and unverifiable), move exact B-Rep and
 report honestly what was lost.
@@ -64,7 +64,7 @@ report honestly what was lost.
 | Disk | 1–30 MB of temp files per conversion; `work/` is disposable | — |
 
 No third-party CAD library is required on the Python side (no OCCT / pythonocc / FreeCAD).
-`pytest` is optional: `scripts/run_tests.py` runs all 92 tests with plain Python.
+`pytest` is optional: `scripts/run_tests.py` runs all 131 tests with plain Python.
 
 ## 3. Install and quick start
 
@@ -135,13 +135,16 @@ swnx-switch.cmd convert "D:\path\part.prt" "D:\path\part.back.SLDPRT"
 
 | Command | Purpose | Key options |
 |---|---|---|
-| `probe` | Inspect the environment and both backends | `--json` |
-| `read <file>` | Read a part into IR JSON | `--out`, `--via nx\|solidworks` (which app imports a STEP/Parasolid file), `--json` |
+| `probe` | Inspect the environment and both backends | `--json`, `--deep` (really starts/attaches once, 5–20 s) |
+| `read <file>` | Read a part into IR JSON | `--out`, `--via nx\|solidworks`, `--keep-app`, `--json` |
 | `brief <ir.json>` | Render the IR as a part brief | `--out` |
-| `convert <src> <dst>` | Convert, validate, report | `--mode auto\|step\|parasolid`, `--step-variant`, `--force`, `--tolerance KEY=VAL`, `--no-report`, `--drop-intermediate`, `--json` |
+| `convert <src> <dst>` | Convert, validate, report | `--mode`, `--step-variant`, `--force`, `--tolerance`, `--no-report`, `--report-dir`, `--keep-app`, `--preflight`, `--drop-intermediate`, `--json` |
 | `compare <ref> <cand>` | Compare two IR docs or two native files | `--tolerance`, `--json` |
 | `routes` | List supported conversion routes | `--json` |
 | `mcp` | Run the MCP stdio server | `--workdir`, `--outdir` |
+
+`convert` now validates the request **before** starting any CAD (source == target, same format,
+target exists, `--mode` contradicts the target extension) and fails in milliseconds (0.2.0).
 
 **Exit codes**: `0` success (or verdict `pass`/`warn`), `1` conversion/validation failure,
 `2` environment error (CAD not found, dependency missing).
@@ -156,6 +159,8 @@ swnx-switch.cmd convert "D:\path\part.prt" "D:\path\part.back.SLDPRT"
 | `SWNX_NX_JOURNAL` | Override the NX journal | `tools/nx/driver.py` |
 | `SWNX_WORKDIR` / `SWNX_OUTDIR` | Run/output directories | `<repo>/work`, `<repo>/out` |
 | `SWNX_LIVE=1` | Enable tests that need the real CAD apps | off |
+| `SWNX_KEEP_APP=1` | Keep the CAD app running after a job for reuse | off |
+| `SWNX_SW_ATTACH_TIMEOUT` | Seconds to wait for SolidWorks to enter the COM ROT after launch | 90 |
 | `SWNX_SWITCH_HOME` / `SWNX_PYTHON` | Plugin: project root / interpreter | auto |
 | `SWNX_ENABLE_MCP=0` | Load the plugin without registering tools | on |
 
@@ -171,10 +176,12 @@ python -m swnx_switch.ai.mcp_server
 
 | Tool | Arguments | Returns | Runtime |
 |---|---|---|---|
-| `swnx_probe` | — | environment + backend availability | <1 s |
-| `swnx_read_part` | `path`, `via?`, `save_ir?`, `brief?` | summary + IR + brief | 8–60 s |
-| `swnx_convert_part` | `source`, `target`, `mode?`, `step_variant?`, `force?`, `report?`, `tolerance?` | verdict + per-check table + report paths | 1–5 min |
-| `swnx_compare_parts` | `reference`, `candidate` | comparison result | seconds |
+| `swnx_probe` | `deep?` | environment + backend state; with `deep=true` also launchable/reachable/last_error | <1 s / 5–20 s |
+| `swnx_read_part` | `path`, `via?`, `save_ir?`, `brief?`, `keep_app?` | summary + IR path + brief (no longer echoes the whole IR) | 8–60 s |
+| `swnx_convert_part` | `source`, `target`, `mode?`, `step_variant?`, `force?`, `report?`, `tolerance?`, `keep_app?`, `preflight?` | verdict + key checks + target sha256 + report path | 1–5 min |
+| `swnx_convert_start` | same as above | returns a `job_id` immediately; runs in the background | milliseconds |
+| `swnx_job_status` | `job_id` | state / stage / elapsed_s / stages done / slim result when finished | milliseconds |
+| `swnx_compare_parts` | `reference`, `candidate`, `tolerance?` | comparison result | seconds |
 | `swnx_part_brief` | `ir` | Markdown brief | <1 s |
 | `swnx_list_routes` | — | route table | <1 s |
 
@@ -182,9 +189,9 @@ Typical conversation (with the DSH plugin installed):
 
 > Convert `D:\...\fork_joint.SLDPRT` to NX `.prt` and tell me whether the geometry changed.
 
-The agent calls `swnx_probe` → (optionally `swnx_read_part`) → `swnx_convert_part`, then reports the
-verdict, the volume/bounding-box deviation, the report path, and the fact that parametric features
-were not preserved.
+The agent calls `swnx_probe` → (optionally `swnx_read_part`) → `swnx_convert_start` →
+`swnx_job_status` polling, then reports the verdict, the volume/bounding-box deviation, the report
+path, and the fact that parametric features were not preserved.
 
 ## 6. Data model (IR)
 
@@ -276,9 +283,14 @@ The two sides are **what the two CAD applications report**, not a text guess ove
 | Feature-tree delta | informational | optional |
 
 **Verdict semantics**: `pass` (all required checks pass) / `warn` (only optional/informational
-anomalies, e.g. feature-tree loss) / `fail` (any required check fails **or cannot be confirmed**).
-`unavailable` is not a pass: a required check without data fails, deliberately — silence must not
-look like agreement.
+anomalies, e.g. feature-tree loss; a **metadata** mismatch such as material density also lands here,
+because density is not shape and every required geometry check still passes) / `fail` (any
+**required** check fails **or cannot be confirmed**). `unavailable` is not a pass: a required check
+without data fails, deliberately — silence must not look like agreement.
+
+Since 0.2.0, `mass`/`density` are optional: their failure downgrades the verdict to `warn` with the
+basis "metadata mismatch (geometry unaffected)". This came from a real conversion where the
+SolidWorks export carried density 1 instead of 1000 while all 14 geometry checks passed.
 
 Tolerances are overridable: `--tolerance volume=2e-3 --tolerance bbox_abs=0.1`. Short names map to
 canonical keys (`volume_rel`, `area_rel`, `bbox_abs_mm`, `bbox_rel`, `bbox_corner_abs_mm`,
@@ -316,6 +328,24 @@ Runtime **34.2 s** (SW export 7 s + NX import 10 s + reads and validation); outp
 Raw evidence (auditable and reproducible): [docs/evidence/README.md](docs/evidence/README.md) —
 full `e2e-evidence.json`, both validation reports, and each driver's acceptance record.
 
+### Reliability work in 0.2.0 (from a real user report)
+
+A caller ran two conversions back to back on a real machine and reported three P0s plus several
+P1/P2s. 0.2.0 addresses each; the full phenomenon → root cause → fix → verification mapping is in
+[docs/reliability.md](docs/reliability.md). Summary:
+
+| Problem | How 0.2.0 handles it |
+|---|---|
+| Conversion succeeded but the tool returned `invalid output: value is not lossless JSON` | every exit goes through [wire.py](src/swnx_switch/ai/wire.py): `allow_nan=False` plus non-finite → `null`; `data` carries verdict/key checks/sha256/report path instead of the full comparison |
+| The second conversion silently waited 429 s and failed | COM activation retries with 2/5/10 s backoff, then ROT polling every 2 s (90 s default, `SWNX_SW_ATTACH_TIMEOUT`); failure hints include the log tail and decoded error codes |
+| SolidWorks would not start after repeated COM start/stop | `--keep-app` / `keep_app=true` reuses the running instance; after exiting, wait for the process to disappear and settle 1.5 s; write `diagnose.md` on connect failure |
+| Long conversion had no progress | `swnx_convert_start` + `swnx_job_status` (and CLI stage lines on stderr): `source_read → export → import → target_read → validate → report` |
+| `probe`'s `available` was not honest | split into `installed` / `launchable` / `reachable` / `last_error`; `probe --deep` actually starts/attaches once |
+| Overweight return values | `data` minimised; full IR only at `ir_path`, full comparison only in the report file |
+| Report buried under `work/` | a `<target>.validation.md` / `.json` copy is written beside the produced part and returned as an absolute path |
+| Extension/mode conflicts discovered too late | millisecond-level request validation before any CAD starts |
+| Expected difference not up front | first line of every conversion result is "geometry 1:1, parametric features not preserved" |
+
 ## 10. Known limitations
 
 1. **No parametric features**: the target is a dumb solid — no sketches, parameters or parent/child
@@ -342,6 +372,9 @@ Full list and the verified/unverified table: [docs/limitations.md](docs/limitati
 | `target already exists` | destination exists | add `--force` |
 | Conversion succeeds with `feature_tree: warn` | parametric features are not preserved | expected, not a failure |
 | Volume/bbox deviation >1e-3 | lost body, unit error, or a different model | read the report; check the source sha256 |
+| The second conversion hung for ~7 minutes before `CO_E_SERVER_EXEC_FAILURE` | old behaviour: reactivating SW right after exit, with a single 420 s wait | 0.2.0 retries with backoff and polls the ROT for 90 s; see `diagnose.md` in that job's directory if it still fails |
+| `SLDWORKS.exe` exits immediately after several conversions | repeated COM start/stop racing the single-instance/licence teardown | pass `--keep-app` (or `keep_app=true`) to reuse one instance; start SW manually once if needed |
+| `probe` says available but SW cannot start | the old `available` only proved exe/ProgID existed | run `probe --deep`: it reports launchable/reachable/last_error |
 
 **Three driver traps (already worked around — do not undo)**:
 SolidWorks must not `OpenDoc6` a foreign `.prt`/`.x_t` (it kills the COM server; use
@@ -357,6 +390,8 @@ CLI / MCP / DSH plugin / skill
    validate.py   15 tolerance checks (pure stdlib, no CAD needed)
    report.py     Chinese Markdown + JSON reports
    ir.py         neutral model, builders, schema validation
+   jobs.py       background job table (convert_start / job_status)
+   ai/wire.py    strict JSON at the tool boundary (no NaN/Infinity)
         │  Job(JSON) -> subprocess -> JobResult(JSON)
    backends/base.py   subprocess protocol, timeout, logging, cross-process lock per backend
    backends/nx.py  -> tools/nx/driver.py   NXOpen journal (NX embedded Python 3.10)
@@ -365,15 +400,15 @@ CLI / MCP / DSH plugin / skill
 
 | Path | Purpose |
 |---|---|
-| `src/swnx_switch/` | ir / pipeline / validate / report / cli / lock / paths / errors |
-| `src/swnx_switch/ai/` | brief / tools (registry) / mcp_server (stdio) |
+| `src/swnx_switch/` | ir / pipeline / validate / report / cli / lock / paths / errors / jobs |
+| `src/swnx_switch/ai/` | brief / tools (registry) / mcp_server (stdio) / wire (strict JSON) |
 | `src/swnx_switch/backends/` | base (protocol + lock) / nx.py / sw.py |
 | `tools/nx/driver.py` | NX batch journal (pure ASCII, 3.10-compatible) |
 | `tools/sw/driver.py` | SolidWorks COM driver (separate process, always writes a result file) |
 | `plugin/` | DSH plugin package (one MCP row; peer resolution for linked installs) |
 | `skills/swnx-switch/` | operating manual for the agent |
 | `scripts/` | `verify_e2e.py` / `run_tests.py` / `menu.ps1` |
-| `tests/` | IR, MCP protocol, validator (92 tests, no CAD needed) |
+| `tests/` | IR, MCP protocol, validator, strict-JSON and job tests (131 tests, no CAD needed) |
 | `docs/` | architecture / feasibility / research / limitations / evidence |
 
 Adding another CAD app: subclass `Backend` (`available` / `app_version` / `_command`), write a driver
@@ -383,7 +418,7 @@ that reads `SWNX_REQUEST` and writes `SWNX_RESULT`, register the format in `form
 ## 13. Development and testing
 
 ```bat
-:: full suite (no third-party dependencies, 92 tests)
+:: full suite (no third-party dependencies, 131 tests)
 python scripts\run_tests.py
 
 :: when pytest is available
@@ -424,12 +459,14 @@ design:
 
 ## 15. Version and roadmap
 
-**0.1.0 (current)**: IR extraction, bidirectional conversion (Parasolid route verified), 15-check
-validation, bilingual reports, CLI / double-click menu / MCP / DSH plugin / skill, 92 automated tests.
+**0.2.0 (current)**: reliability release on top of 0.1.0 — strict JSON tool boundary and slim
+payloads, async jobs (`convert_start` + `job_status`), SolidWorks COM retry and ROT polling,
+`--keep-app` instance reuse, `diagnose.md`, three-state `probe --deep`, reports beside the target,
+request validation. 131 automated tests.
 
-**Planned**: assembly BOM/instance mapping; `--mode step` verification on a machine with a licensed
-STEP translator; read-only extraction of drawing views/annotations; directory-level batch conversion
-with incremental re-runs.
+**Planned**: assembly BOM/instance mapping; `--mode step` verification on a machine with a
+licensed STEP translator; read-only drawing view/annotation extraction; directory-level batch
+conversion with incremental re-runs; job cancellation.
 
 **Explicitly out of scope**: feature-level reconstruction (no verifiable method, and commercial tools
 do not promise it); reverse-engineering native formats; licence bypass; treating STL/mesh as an

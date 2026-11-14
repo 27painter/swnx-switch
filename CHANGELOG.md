@@ -1,0 +1,63 @@
+# Changelog
+
+## 0.2.0 — 2026-11-14
+
+可靠性版本：按一份真实调用方的使用报告（桌面 `swnx-switch使用体验与改进建议报告.md`）逐项修复。
+详细对照见 [docs/reliability.md](docs/reliability.md)。
+
+### 新增
+
+- `swnx_convert_start` + `swnx_job_status`：异步转换与阶段轮询
+  （`source_read → export → import → target_read → validate → report`）。
+- CLI `probe --deep`：真实尝试启动/连接 CAD，返回 `installed / launchable / reachable / last_error`。
+- CLI/工具 `keep_app`（`--keep-app`）：作业结束后保持 CAD 运行，供下一次转换复用实例。
+- CLI `--preflight` / 工具 `preflight`：转换前深度探测，环境不可用时快速失败。
+- CLI `--report-dir`：报告副本目录（默认放目标文件旁）。
+- `diagnose.md`：SolidWorks 连接失败时自动生成（进程/ROT/错误码/日志尾）。
+- `docs/reliability.md`、`tests/test_jobs.py`、`tests/test_ai_output.py`。
+
+### 修复
+
+- **P0** 成功却返回 `invalid output: value is not lossless JSON`：工具出口统一严格 JSON
+  （`allow_nan=False` + 非有限数清洗），`structuredContent` 二次清洗。
+- **P0** 第二次转换静默等 429 s：COM 激活退避重试（2/5/10 s）+ 启动后每 2 s 轮询 ROT
+  （默认 90 s，`SWNX_SW_ATTACH_TIMEOUT`），失败 hint 带日志尾与错误码解码。
+- **P0** 连续启停后 SolidWorks 起不来：`keep_app` 复用实例；退出后等进程消失再静置 ≥1.5 s。
+- **P1** 长任务无进度：后台作业 + 阶段事件（CLI 同步输出阶段到 stderr）。
+- **P1** 返回值过重：`data` 最小化（verdict/关键检查/sha256/报告路径），IR 与完整对比留在磁盘。
+- **P1** `probe` 的 `available` 不实：三态 + `last_error`；默认轻量、`deep` 才真探测。
+- **P1** 日志措辞 `processes before connect: unavailable` → `unknown (enumerate failed: ...)`。
+- **P2** 报告埋在 `work/`：目标文件旁另写 `<目标名>.validation.md/.json`，返回绝对路径。
+- **P2** 目标扩展名与模式冲突要转完才发现：入口毫秒级校验（源=目标、同格式、已存在、mode 冲突）。
+- **P2** 预期差异不前置：转换结果文本第一行固定为"几何 1:1，参数化特征不保留"。
+- 校验语义：`mass`/`density`（optional）失败不再判 `fail`，降级为 `warn` 并注明"元数据项不匹配（几何不受影响）"；
+  新增测试 `test_metadata_only_mismatch_is_warn_not_fail`。
+- COM attach：`pythoncom.GetActiveObject` 返回的是 `PyIUnknown`，必须先 `QueryInterface(IID_IDispatch)`
+  再包 dynamic dispatch，否则 attach 路径读件会报 `'PyIUnknown' object has no attribute 'GetIDsOfNames'`。
+
+### 变更（客户端可见）
+
+- `swnx_read_part` 的 `data` 不再含 IR 全文（改 `ir_path`）。
+- `swnx_convert_part` 的 `data` 不再含完整 `comparison`（改 `report_json`）。
+- 工具数 6 → 8。旧工具名/参数保持兼容。
+
+### 真机验证（2026-11-14，`work/verify/reliability_live.ps1`，证据见 `docs/evidence/reliability-live*`）
+
+- `probe --deep`：NX 9.8 s；SW `installed=True reachable=True launchable=None`（有实例可 attach）。
+- 两次转换 + 一次读件全部 exit 0：`--preflight --keep-app` 35.4 s、`--keep-app` 25.6 s、`read --keep-app` 4.0 s；
+  keep_app 生效（SW 进程始终是同一个 pid，没有反复冷启动）。
+- 报告就近：`live1/live2.validation.md/.json` 均生成。
+- 附带发现并修正：attach 到用户实例后 SW 导出的 Parasolid 密度属性为 1（全新实例为 1000），
+  导致 mass/density 不一致而几何 14 项全过 → 校验语义改为 optional 失败降级 warn。
+
+### 测试
+
+- `tests/test_ai_output.py`：严格 JSON、瘦身负载、MCP 子进程级 NaN 回归、异步作业工具。
+- `tests/test_jobs.py`：作业状态机、阶段记录、失败捕获、列表裁剪。
+- `tests/test_pipeline.py`：入口校验、报告就近、进度回调、keep_app 选项。
+- 全量：107 项通过（无第三方依赖）。
+
+## 0.1.0 — 2026-11-13
+
+首个版本：中立 IR 读取、SolidWorks ⇄ NX 双向转换（Parasolid 路线）、15 项容差校验、
+双语报告、CLI / 双击菜单 / MCP / DSH 插件 / skill、端到端实测（体积偏差 3.7e-07 mm³）。

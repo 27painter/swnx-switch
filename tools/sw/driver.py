@@ -33,10 +33,23 @@ Job kinds
 
 Deliberate rules
 ----------------
-* One job == one process.  If no SolidWorks instance answers in the COM ROT the
-  driver starts ``SLDWORKS.exe`` itself, waits for it to register, and calls
-  ``ExitApp()`` on the way out.  An instance that was already running (a user's
-  session) is never quit: only the documents this job opened are closed.
+* One job == one process.  If no SolidWorks instance answers the COM ROT the
+  driver tries ``DispatchEx`` again (2 s / 5 s / 10 s backoff on the transient
+  ``CO_E_SERVER_EXEC_FAILURE`` / ``MK_E_UNAVAILABLE`` errors), then starts
+  ``SLDWORKS.exe`` itself and **polls** the ROT every 2 s for at most 90 s
+  (``$SWNX_SW_ATTACH_TIMEOUT``) instead of one 420 s wait.  A launcher that dies
+  before registering fails the job immediately (report P0-2).
+* An instance that was already running (a user's session) is never quit: only
+  the documents this job opened are closed.  An instance this job started is
+  quit with ``ExitApp()``, then polled until the process is really gone and left
+  to settle ~1.5 s before the driver returns (``$SWNX_SW_EXIT_SETTLE``), so a
+  batch does not race the licence/single-instance teardown (report P0-3).
+* ``keep_app`` (job option) / ``$SWNX_KEEP_APP=1`` skips the quit for an instance
+  this job started: the next job's ``GetActiveObject`` attaches to it, which
+  removes the repeated cold starts that made SolidWorks refuse to start again.
+* A connect failure writes ``diagnose.md`` next to the job (process list, COM
+  error codes, ROT probe, licence hints, log tail) and appends the log tail to
+  the failure hint, so a caller does not have to dig through ``work/``.
 * Documents are opened read-only, silent, and never rebuilt in batch, so the
   driver cannot pop a rebuild/reference dialog and hang a pipeline.
 * Every numeric value in the emitted IR is read from the API.  When an API call
@@ -51,6 +64,25 @@ Run manually::
     python tools/sw/driver.py --request work/sw/request.json
 
 (``SWNX_REQUEST``/``SWNX_RESULT``/``SWNX_LOG`` are normally set by the caller.)
+
+Tuning (job option first, then environment, then the default)
+-------------------------------------------------------------
+``keep_app`` / ``$SWNX_KEEP_APP=1``
+    Leave an instance this job started running (the next job attaches).
+``connect_timeout`` / ``$SWNX_SW_ATTACH_TIMEOUT`` (90 s)
+    ROT poll deadline after launching ``SLDWORKS.exe``.
+``rot_poll`` / ``$SWNX_SW_ROT_POLL`` (2 s)
+    How often the ROT is polled while waiting for the launcher.
+``activate_retries`` / ``$SWNX_SW_ACTIVATE_RETRIES`` (3)
+    Extra DispatchEx attempts after the first one.
+``activate_backoff`` / ``$SWNX_SW_ACTIVATE_BACKOFF`` (``2,5,10``)
+    Seconds to wait between those attempts.
+``exit_timeout`` / ``$SWNX_SW_EXIT_TIMEOUT`` (10 s)
+    Wait for the process to disappear after ``ExitApp``/taskkill.
+``exit_settle`` / ``$SWNX_SW_EXIT_SETTLE`` (1.5 s)
+    Quiet time after the process is gone (no start/teardown race).
+``deep``
+    Probe only: fast attach/activate check, short timeouts (``probe --deep``).
 """
 
 from __future__ import annotations
@@ -138,10 +170,20 @@ _LOG_PATH = os.environ.get("SWNX_LOG")
 class DriverError(RuntimeError):
     """A job step failed with a message meant for the caller's result JSON."""
 
-    def __init__(self, message: str, *, hint: str | None = None, detail: Any = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        hint: str | None = None,
+        detail: Any = None,
+        context: dict | None = None,
+    ):
         super().__init__(message)
         self.hint = hint
         self.detail = detail
+        #: Extra machine-readable evidence attached by the failure site (the
+        #: connect failure puts the connectivity tri-state and diagnose.md here).
+        self.context = dict(context or {})
 
 
 def log(message: str, level: str = "INFO") -> None:
@@ -187,6 +229,256 @@ def _write_result(payload: dict, path: Path | None = None) -> Path:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return target
+
+
+# --------------------------------------------------------------------------- #
+# timing knobs (job option > environment > default)
+#
+# Every knob below can be overridden per job through ``request["options"]``; the
+# environment variable is the process-wide default so a launcher can tune a whole
+# session without touching the request JSON.  Options always win over the env.
+# --------------------------------------------------------------------------- #
+#: Backoff (seconds) between DispatchEx attempts after a *transient* HRESULT.
+#: The observed failure mode is a local server that is still tearing down right
+#: after the previous job's ExitApp (report P0-2 timeline: 13:30:31/13:30:39).
+ACTIVATE_BACKOFF = (2.0, 5.0, 10.0)
+#: Retries *after* the first DispatchEx attempt (3 retries == up to 4 attempts).
+ACTIVATE_RETRIES = 3
+#: ROT poll deadline after launching SLDWORKS.exe ourselves (was one 420 s wait).
+DEFAULT_ATTACH_TIMEOUT = 90.0
+#: How often the COM ROT is polled while waiting for the launcher.
+DEFAULT_ROT_POLL = 2.0
+#: Wait for the process to disappear after ExitApp/taskkill (<= 10 s).
+DEFAULT_EXIT_TIMEOUT = 10.0
+#: Quiet time after the process is gone before the driver returns, so an
+#: immediate next start does not race the licence/single-instance teardown.
+DEFAULT_EXIT_SETTLE = 1.5
+#: Deep probe: budget for the attach/activate attempt (no long cold start wait).
+#: Kept short on purpose: a deep probe is a 5-20 s "can it start now" check, not
+#: a conversion (env SWNX_SW_DEEP_PROBE_TIMEOUT).
+DEFAULT_DEEP_PROBE_TIMEOUT = 20.0
+
+
+def _option_raw(options: dict, name: str, env: str | None) -> Any:
+    """Return the raw option value, the env value, or ``_MISSING``."""
+    if isinstance(options, dict) and options.get(name) is not None:
+        return options[name]
+    if env:
+        value = os.environ.get(env)
+        if value is not None and value != "":
+            return value
+    return _MISSING
+
+
+def _option_float(options: dict, name: str, env: str | None, default: float) -> float:
+    raw = _option_raw(options, name, env)
+    if raw is _MISSING:
+        return float(default)
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        log(f"ignoring non-numeric option {name}={raw!r}; using {default}", "WARN")
+        return float(default)
+
+
+def _option_int(options: dict, name: str, env: str | None, default: int) -> int:
+    raw = _option_raw(options, name, env)
+    if raw is _MISSING:
+        return int(default)
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError):
+        log(f"ignoring non-numeric option {name}={raw!r}; using {default}", "WARN")
+        return int(default)
+
+
+def _option_flag(options: dict, name: str, env: str | None, default: bool = False) -> bool:
+    raw = _option_raw(options, name, env)
+    if raw is _MISSING:
+        return bool(default)
+    if isinstance(raw, str):
+        return raw.strip().lower() in ("1", "true", "yes", "on")
+    return bool(raw)
+
+
+def _option_seconds_list(
+    options: dict, name: str, env: str | None, default: tuple[float, ...]
+) -> list[float]:
+    """Parse ``"2,5,10"`` into ``[2.0, 5.0, 10.0]``; bad entries are dropped."""
+    raw = _option_raw(options, name, env)
+    if raw is _MISSING:
+        return list(default)
+    if isinstance(raw, (int, float)):
+        return [max(0.0, float(raw))]
+    values: list[float] = []
+    for item in str(raw).replace(";", ",").split(","):
+        item = item.strip()
+        if not item:
+            continue
+        try:
+            values.append(max(0.0, float(item)))
+        except ValueError:
+            continue
+    return values or list(default)
+
+
+def _settle_seconds(options: dict) -> float:
+    """Teardown grace after the process disappears (report P0-3)."""
+    return _option_float(options, "exit_settle", "SWNX_SW_EXIT_SETTLE", DEFAULT_EXIT_SETTLE)
+
+
+def _keep_app(options: dict) -> bool:
+    """True when this job must leave a SolidWorks instance it started running."""
+    return _option_flag(options, "keep_app", "SWNX_KEEP_APP", False)
+
+
+def _deep_probe_options(options: dict) -> dict:
+    """Short, fail-fast options for a ``probe --deep`` job.
+
+    A deep probe must answer "can this CAD start *now*" in seconds, not minutes,
+    and it never needs the long 90 s cold-start wait of a real conversion: the
+    launcher-exit fast-fail below is what makes the broken-seat case quick.
+    """
+    deep = dict(options)
+    deep["deep"] = True
+    if deep.get("connect_timeout") is None:
+        deep["connect_timeout"] = _option_float(
+            deep, "deep_launch_timeout", "SWNX_SW_DEEP_PROBE_TIMEOUT", DEFAULT_DEEP_PROBE_TIMEOUT
+        )
+    if deep.get("activate_retries") is None:
+        deep["activate_retries"] = 1  # one retry: a 5 s probe must not sleep 17 s
+    if deep.get("activate_backoff") is None:
+        deep["activate_backoff"] = "1"
+    return deep
+
+
+# --------------------------------------------------------------------------- #
+# COM error decoding (the caller sees names, not just HRESULTs)
+# --------------------------------------------------------------------------- #
+#: HRESULTs that mean "the local server is not reachable *yet*": retry.
+TRANSIENT_COM_ERRORS = {
+    -2146959355: "CO_E_SERVER_EXEC_FAILURE (0x80080005)",
+    -2147221021: "MK_E_UNAVAILABLE (0x800401E3)",
+}
+#: HRESULTs worth decoding in a failure hint / diagnose.md.
+COM_ERROR_NAMES = {
+    **TRANSIENT_COM_ERRORS,
+    -2147221164: "REGDB_E_CLASSNOTREG (0x80040154)",
+    -2147221008: "CO_E_NOTINITIALIZED (0x800401F0)",
+    -2147023170: "RPC_S_CALL_FAILED (0x800706BE)",
+    -2147023174: "RPC_S_SERVER_UNAVAILABLE (0x800706BA)",
+    -2147418113: "E_UNEXPECTED (0x8000FFFF)",
+}
+
+
+def _com_error_code(exc: Any) -> int | None:
+    """HRESULT of a pywin32 ``com_error`` (or any exception carrying one)."""
+    for attribute in ("hresult", "hResult"):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, int):
+            return value
+    args = getattr(exc, "args", ()) or ()
+    if args:
+        first = args[0]
+        if isinstance(first, int):
+            return first
+        if isinstance(first, (tuple, list)) and first and isinstance(first[0], int):
+            return first[0]
+    return None
+
+
+def _com_error_label(exc: Any) -> str:
+    """``-2146959355 CO_E_SERVER_EXEC_FAILURE (0x80080005): server failed``."""
+    code = _com_error_code(exc)
+    args = getattr(exc, "args", ()) or ()
+    if len(args) >= 2 and isinstance(args[1], str):
+        # pywin32 com_error args are (hresult, text, excepinfo, argerr); the text
+        # is the useful half, the tuple repr is noise in a failure hint.
+        text = args[1]
+    else:
+        text = str(exc)
+    text = text.replace("\r", " ").replace("\n", " ").strip()
+    if code is None:
+        return text or type(exc).__name__
+    name = COM_ERROR_NAMES.get(code)
+    decoded = f"{code} {name}" if name else f"{code} (0x{code & 0xFFFFFFFF:08X})"
+    return f"{decoded}: {text}" if text else decoded
+
+
+def _is_transient_com_error(exc: Any) -> bool:
+    return _com_error_code(exc) in TRANSIENT_COM_ERRORS
+
+
+def activation_plan(options: dict) -> tuple[int, list[float]]:
+    """(attempts, backoff delays) for COM activation, from options/env."""
+    retries = max(
+        0, _option_int(options, "activate_retries", "SWNX_SW_ACTIVATE_RETRIES", ACTIVATE_RETRIES)
+    )
+    delays = _option_seconds_list(
+        options, "activate_backoff", "SWNX_SW_ACTIVATE_BACKOFF", ACTIVATE_BACKOFF
+    )
+    return retries + 1, delays
+
+
+def _dispatch_solidworks() -> Any:
+    """Create/activate the SolidWorks local server through COM."""
+    import win32com.client  # noqa: PLC0415 - pywin32, Windows only
+
+    return win32com.client.DispatchEx(PROGID)
+
+
+def _activate_with_retry(
+    options: dict,
+    *,
+    activate: Any = None,
+    sleep: Any = time.sleep,
+    logger: Any = log,
+) -> dict:
+    """Call ``DispatchEx`` up to N times, backing off on transient HRESULTs.
+
+    Returns ``{"ok", "raw", "attempt", "attempts", "errors", "delays_slept"}`` and
+    never raises: the caller still has the "launch SLDWORKS.exe directly"
+    fallback.  Non-transient errors (e.g. the ProgID is not registered) stop the
+    retry loop immediately instead of sleeping pointlessly.
+    """
+    attempts, delays = activation_plan(options)
+    activate = activate or _dispatch_solidworks
+    errors: list[str] = []
+    slept: list[float] = []
+    for index in range(1, attempts + 1):
+        try:
+            raw = activate()
+        except Exception as exc:  # noqa: BLE001 - the HRESULT decides what to do
+            label = _com_error_label(exc)
+            errors.append(label)
+            transient = _is_transient_com_error(exc)
+            suffix = " (transient)" if transient else " (not transient)"
+            logger(f"DispatchEx attempt {index}/{attempts} failed: {label}{suffix}", "WARN")
+            if not transient:
+                break
+            if index < attempts:
+                delay = delays[min(index - 1, len(delays) - 1)]
+                logger(f"retrying COM activation in {delay:.1f}s")
+                sleep(delay)
+                slept.append(delay)
+            continue
+        logger(f"COM activation succeeded on attempt {index}/{attempts}")
+        return {
+            "ok": True,
+            "raw": raw,
+            "attempt": index,
+            "attempts": attempts,
+            "errors": errors,
+            "delays_slept": slept,
+        }
+    return {
+        "ok": False,
+        "raw": None,
+        "attempt": len(errors),
+        "attempts": attempts,
+        "errors": errors,
+        "delays_slept": slept,
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -302,12 +594,14 @@ def _source_format(path: str | os.PathLike) -> str:
     return {".sldprt": "sldprt", ".sldasm": "sldasm", ".slddrw": "slddrw"}.get(suffix, suffix.lstrip(".") or "unknown")
 
 
-def _sldworks_pids() -> set[int] | None:
-    """PIDs of running SLDWORKS.exe processes, or ``None`` when it cannot be read.
+def _enumerate_sldworks_processes() -> tuple[set[int], str | None]:
+    """PIDs of running SLDWORKS.exe processes plus the enumeration error (if any).
 
     ``tasklist`` is the only listing mechanism that works both under a restricted
     token and in a normal desktop session; when it is blocked the caller falls
-    back to "ownership by launch pid" and stays conservative.
+    back to "ownership by launch pid" and stays conservative.  The error is
+    returned separately because "could not ask" must never be logged as "none
+    running" (report P1-4).
     """
     try:
         completed = subprocess.run(
@@ -317,11 +611,14 @@ def _sldworks_pids() -> set[int] | None:
             errors="replace",
             timeout=20,
         )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    except (OSError, subprocess.SubprocessError) as exc:
+        return set(), f"{type(exc).__name__}: {exc}"
     text = completed.stdout or ""
-    if completed.returncode != 0 or "Access denied" in text or "拒绝访问" in text:
-        return None
+    if completed.returncode != 0:
+        detail = (text or completed.stderr or "").strip().replace("\n", " ")
+        return set(), f"tasklist exit {completed.returncode}: {detail[:200] or 'no output'}"
+    if "Access denied" in text or "拒绝访问" in text:
+        return set(), "access denied while listing processes"
     pids: set[int] = set()
     for line in text.splitlines():
         cells = [cell.strip().strip('"') for cell in line.split('","')]
@@ -330,7 +627,91 @@ def _sldworks_pids() -> set[int] | None:
                 pids.add(int(cells[1].strip('"')))
             except ValueError:
                 continue
-    return pids
+    return pids, None
+
+
+def _sldworks_pids() -> set[int] | None:
+    """Compat wrapper: the PID set, or ``None`` when it cannot be enumerated."""
+    pids, error = _enumerate_sldworks_processes()
+    return None if error is not None else pids
+
+
+def _format_process_list(pids: set[int] | None, error: str | None = None) -> str:
+    """Render a PID set for the log: ``[]`` / ``[1234, 5678]`` / ``unknown (...)``.
+
+    The old wording was ``unavailable``, which readers took to mean "SolidWorks
+    was not running" when it really meant "the process list could not be read"
+    (report P1-4).  These three shapes cannot be misread.
+    """
+    if pids is None:
+        return f"unknown (enumerate failed: {error or 'no detail'})"
+    return "[" + ", ".join(str(pid) for pid in sorted(pids)) + "]"
+
+
+def _sldworks_process_details() -> dict:
+    """pid / name / creation time for SLDWORKS.exe and sw_d.exe (diagnose.md).
+
+    Best effort by design: a restricted token may not be able to open every
+    process handle.  When pywin32 enumeration is unavailable the ``tasklist``
+    fallback still yields PIDs; anything that failed is reported under ``error``
+    instead of being hidden.
+    """
+    wanted = {"sldworks.exe", "sw_d.exe"}
+    snapshot: dict[str, Any] = {"api": None, "processes": [], "error": None}
+    try:
+        import win32api  # noqa: PLC0415 - pywin32, Windows-only diagnostics
+        import win32con  # noqa: PLC0415
+        import win32process  # noqa: PLC0415
+
+        pids = win32process.EnumProcesses()
+    except Exception as exc:  # noqa: BLE001 - fall back to tasklist below
+        snapshot["error"] = f"EnumProcesses failed: {type(exc).__name__}: {exc}"
+    else:
+        snapshot["api"] = "win32process.EnumProcesses"
+        # GetModuleFileNameEx wants PROCESS_QUERY_INFORMATION|PROCESS_VM_READ;
+        # fall back to the limited right when the full one is denied.
+        full_access = getattr(win32con, "PROCESS_QUERY_INFORMATION", 0x0400) | getattr(
+            win32con, "PROCESS_VM_READ", 0x0010
+        )
+        for pid in pids:
+            handle = None
+            try:
+                try:
+                    handle = win32api.OpenProcess(full_access, False, pid)
+                except Exception:  # noqa: BLE001 - try the limited right instead
+                    handle = win32api.OpenProcess(
+                        win32con.PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+                    )
+            except Exception:  # noqa: BLE001 - protected/system process: skip it
+                continue
+            try:
+                try:
+                    name = Path(win32process.GetModuleFileNameEx(handle, 0)).name
+                except Exception:  # noqa: BLE001 - cannot name it, so cannot match it
+                    continue
+                if name.lower() not in wanted:
+                    continue
+                created = None
+                try:
+                    times = win32process.GetProcessTimes(handle)
+                    created = str(times.get("CreationTime")) if isinstance(times, dict) else None
+                except Exception:  # noqa: BLE001 - start time is optional evidence
+                    created = None
+                snapshot["processes"].append({"pid": int(pid), "name": name, "created": created})
+            finally:
+                try:
+                    win32api.CloseHandle(handle)
+                except Exception:  # noqa: BLE001
+                    pass
+        return snapshot
+
+    # pywin32 enumeration failed: keep the pid evidence we can still get.
+    pids, error = _enumerate_sldworks_processes()
+    if error is None:
+        snapshot["processes"] = [{"pid": pid, "name": "SLDWORKS.exe", "created": None} for pid in sorted(pids)]
+    else:
+        snapshot["error"] = (snapshot["error"] + "; " if snapshot["error"] else "") + f"tasklist: {error}"
+    return snapshot
 
 
 def _process_alive(pid: int) -> bool | None:
@@ -359,22 +740,301 @@ def _process_alive(pid: int) -> bool | None:
             pass
 
 
-def _wait_for_process_exit(pid: int, timeout: float) -> bool:
+def _wait_for_process_exit(
+    pid: int,
+    timeout: float,
+    *,
+    clock: Any = time.monotonic,
+    sleep: Any = time.sleep,
+) -> bool:
     """Wait until ``pid`` is gone, with ``tasklist`` as a second opinion.
 
     ``_process_alive`` can be inconclusive right after a process exits (the handle
     cannot always be opened), which previously reported "survived taskkill" for a
     process that was already gone.  The live PID list from ``tasklist`` decides.
     """
-    deadline = time.monotonic() + max(0.5, timeout)
-    while time.monotonic() < deadline:
+    deadline = clock() + max(0.5, timeout)
+    while clock() < deadline:
         if _process_alive(pid) is False:
             return True
         pids = _sldworks_pids()
         if pids is not None and pid not in pids:
             return True
-        time.sleep(0.5)
+        sleep(0.5)
     return False
+
+
+def _poll_for_rot(
+    probe: Any,
+    *,
+    timeout: float,
+    interval: float,
+    sleep: Any = time.sleep,
+    clock: Any = time.monotonic,
+    launcher: Any = None,
+    on_error: Any = None,
+) -> tuple[Any, dict]:
+    """Poll ``probe()`` until it succeeds or the deadline expires.
+
+    ``launcher`` (optional) returns ``None`` while the process we started is
+    still alive and its exit code once it is gone: a launcher that died before
+    registering is a *fast* failure, not something to wait 90 s for.  Returns
+    ``(value, meta)``; ``meta`` records polls, elapsed time, the last error and
+    the launcher state.  Clock and sleep are injectable, so the timing policy is
+    unit-testable without waiting or starting SolidWorks.
+    """
+    started = clock()
+    meta: dict[str, Any] = {
+        "polls": 0,
+        "elapsed_s": 0.0,
+        "last_error": None,
+        "launcher_exited": False,
+        "launcher_exit_code": None,
+    }
+    while True:
+        remaining = timeout - (clock() - started)
+        if remaining <= 0:
+            break
+        meta["polls"] += 1
+        try:
+            value = probe()
+        except Exception as exc:  # noqa: BLE001 - not registered yet is normal
+            meta["last_error"] = exc
+            if on_error is not None:
+                try:
+                    on_error(meta["polls"], exc)
+                except Exception:  # noqa: BLE001 - logging must not break the wait
+                    pass
+        else:
+            meta["elapsed_s"] = round(clock() - started, 3)
+            return value, meta
+        if launcher is not None:
+            code = launcher()
+            if code is not None:
+                meta["launcher_exited"] = True
+                meta["launcher_exit_code"] = int(code)
+                meta["elapsed_s"] = round(clock() - started, 3)
+                return None, meta
+        remaining = timeout - (clock() - started)
+        if remaining <= 0:
+            break
+        sleep(min(max(interval, 0.05), remaining))
+    meta["elapsed_s"] = round(clock() - started, 3)
+    return None, meta
+
+
+# --------------------------------------------------------------------------- #
+# failure evidence: log tail + diagnose.md
+# --------------------------------------------------------------------------- #
+def _log_tail(lines: int = 20) -> list[str]:
+    """Last non-empty lines of the job log (what the failure hint appends)."""
+    path = _LOG_PATH or os.environ.get("SWNX_LOG")
+    if not path:
+        return []
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    return [line for line in text.replace("\r", "").splitlines() if line.strip()][-lines:]
+
+
+def _append_log_tail(error: "DriverError", lines: int = 20) -> "DriverError":
+    """Append the job-log tail to a failure hint so the caller can self-diagnose."""
+    tail = _log_tail(lines)
+    if not tail:
+        return error
+    block = "recent driver log:\n" + "\n".join(tail)
+    error.hint = f"{error.hint}\n{block}" if error.hint else block
+    return error
+
+
+def _settle_after_exit(seconds: float, sleep: Any = time.sleep) -> float:
+    """Sleep after the process is gone so the next start does not race teardown.
+
+    Report P0-3: SolidWorks would not start again when it was quit and relaunched
+    back to back, with no crash in the Windows log -- the licence/single-instance
+    teardown needs a moment even after the process disappears.  Default 1.5 s
+    (``$SWNX_SW_EXIT_SETTLE``).
+    """
+    try:
+        value = max(0.0, float(seconds))
+    except (TypeError, ValueError):
+        value = 0.0
+    if value <= 0:
+        return 0.0
+    log(f"settling {value:.1f}s after the SolidWorks process exited (teardown grace before the next start)")
+    sleep(value)
+    return value
+
+
+def _workdir() -> Path | None:
+    """The job work directory (where diagnose.md belongs)."""
+    value = os.environ.get("SWNX_WORKDIR")
+    if value:
+        return Path(value)
+    result = _result_path()
+    return result.parent if result is not None else None
+
+
+def _rot_probe() -> dict:
+    """Ask the COM ROT for a running SolidWorks instance (diagnostics only)."""
+    try:
+        import pythoncom  # noqa: PLC0415 - Windows-only
+    except Exception as exc:  # noqa: BLE001 - no pywin32 means no COM diagnosis
+        return {"reachable": False, "pid": None, "error": f"pywin32 unavailable: {exc}"}
+    try:
+        raw = pythoncom.GetActiveObject(PROGID)
+    except Exception as exc:  # noqa: BLE001 - absence is the normal answer
+        return {"reachable": False, "pid": None, "error": _com_error_label(exc)}
+    wrapped = _wrap_dynamic(raw)
+    return {
+        "reachable": True,
+        "pid": int(_f(try_member(wrapped, "GetProcessID", default=0)) or 0),
+        "error": None,
+    }
+
+
+def _diagnose_markdown(context: dict) -> str:
+    """Render the connect-failure diagnose.md (pure: unit-tested offline).
+
+    Everything a user needs to self-diagnose without opening ``work/``: what was
+    tried, the decoded COM errors, the SLDWORKS.exe processes, the ROT probe, the
+    licence hints, and the log tail.  Kept ASCII on purpose (the report is
+    user-facing and may be opened in any editor/console).
+    """
+    connectivity = dict(context.get("connectivity") or {})
+    request = dict(context.get("request") or {})
+    processes = list((context.get("processes") or {}).get("processes") or [])
+    process_error = (context.get("processes") or {}).get("error")
+    rot = dict(context.get("rot_probe") or {})
+    tail = list(context.get("log_tail") or [])
+
+    lines: list[str] = [
+        "# SolidWorks connection failure diagnosis",
+        "",
+        f"- generated: {context.get('generated_at') or 'unknown'}",
+        f"- host: {context.get('host') or 'unknown'}",
+        f"- driver: {context.get('driver_version') or 'unknown'}",
+        f"- workdir: {context.get('workdir') or 'unknown'}",
+        f"- job: kind={request.get('kind')} input={request.get('input')} output={request.get('output')}",
+        f"- outcome: {context.get('error') or 'unknown'}",
+        "",
+        "## What was tried",
+        "",
+        f"- attach to a running instance (GetActiveObject): "
+        f"{connectivity.get('attach_error') or ('OK' if connectivity.get('reachable') else 'not reached')}",
+        f"- COM activation (DispatchEx) attempts: {connectivity.get('activation') or 'not attempted'}",
+        f"- direct SLDWORKS.exe launch: {connectivity.get('launch') or 'not attempted'}",
+        f"- last error: {connectivity.get('last_error') or 'none recorded'}",
+        f"- ROT probe now: reachable={rot.get('reachable')} pid={rot.get('pid')} "
+        f"error={rot.get('error') or 'none'}",
+        "",
+        "## COM errors decoded",
+        "",
+    ]
+    decoded: list[str] = []
+    attach_error = connectivity.get("attach_error")
+    if attach_error:
+        decoded.append(f"- attach: {attach_error}")
+    activation = connectivity.get("activation") or {}
+    for index, entry in enumerate(activation.get("errors") or [], start=1):
+        decoded.append(f"- activation attempt {index}: {entry}")
+    launch = connectivity.get("launch") or {}
+    if launch.get("last_error"):
+        decoded.append(f"- launcher wait: {launch['last_error']}")
+    if not decoded:
+        decoded.append("- (none recorded)")
+    lines.extend(decoded)
+
+    lines.extend(["", "## SLDWORKS.exe / sw_d.exe processes", ""])
+    if processes:
+        lines.append("| pid | name | started |")
+        lines.append("| --- | --- | --- |")
+        for process in processes:
+            lines.append(f"| {process.get('pid')} | {process.get('name')} | {process.get('created') or 'unknown'} |")
+    else:
+        lines.append("- none listed" + (f" (enumeration error: {process_error})" if process_error else ""))
+    if process_error and processes:
+        lines.append("")
+        lines.append(f"- enumeration note: {process_error}")
+
+    lines.extend(
+        [
+            "",
+            "## Licence / login hints",
+            "",
+            "- Licence/login state: unknown (it cannot be queried without the SolidWorks GUI).",
+            "- A pending login/licence dialog, an unreachable SolidWorks licence server, or an",
+            "  expired subscription blocks the COM server from registering; the window may be",
+            "  hidden behind other windows or waiting on another desktop session.",
+            "- Check whether sw_d.exe (the SolidWorks licence daemon) is running; it is listed",
+            "  above when found.",
+            "- Next step: start SLDWORKS.exe by hand, wait until the GUI is fully loaded and",
+            "  logged in, then retry.  `probe --deep` reruns exactly this connectivity check.",
+            "",
+            "## Recent driver log",
+            "",
+            "```",
+        ]
+    )
+    lines.extend(tail or ["(script log unavailable)"])
+    lines.extend(["```", ""])
+    return "\n".join(lines)
+
+
+def _write_diagnose_md(context: dict, workdir: Path | None = None) -> Path | None:
+    """Write diagnose.md into the job workdir; never raises."""
+    target = Path(workdir) if workdir is not None else _workdir()
+    if target is None:
+        return None
+    try:
+        target.mkdir(parents=True, exist_ok=True)
+        path = target / "diagnose.md"
+        path.write_text(_diagnose_markdown(context), encoding="utf-8")
+        return path
+    except OSError as exc:
+        log(f"could not write diagnose.md: {exc}", "WARN")
+        return None
+
+
+def _diagnose_context(
+    error: "DriverError",
+    connectivity: dict,
+    *,
+    before: set[int] | None,
+    enum_error: str | None,
+) -> dict:
+    """Collect the evidence for diagnose.md (called only on a connect failure)."""
+    request: dict = {}
+    try:
+        request = _load_request()
+    except Exception:  # noqa: BLE001 - the request may itself be unreadable
+        request = {}
+    try:
+        import platform  # noqa: PLC0415 - diagnostic metadata only
+
+        host = f"{platform.node()} ({platform.system()} {platform.release()}, python {platform.python_version()})"
+    except Exception:  # noqa: BLE001
+        host = "unknown"
+    return {
+        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "host": host,
+        "driver_version": DRIVER_VERSION,
+        "workdir": str(_workdir() or ""),
+        "request": {
+            "kind": request.get("kind"),
+            "input": request.get("input"),
+            "output": request.get("output"),
+        },
+        "error": str(error),
+        "hint": error.hint,
+        "connectivity": dict(connectivity),
+        "processes": _sldworks_process_details(),
+        "rot_probe": _rot_probe(),
+        "log_tail": _log_tail(40),
+        "pre_existing_pids": sorted(before) if before is not None else None,
+        "enumeration_error": enum_error,
+    }
 
 
 def _empty_dispatch_variant() -> Any:
@@ -419,34 +1079,87 @@ class SolidWorksSession:
         self.build_numbers: list[int] = []
         self._restore: list[tuple[str, Any]] = []
         self._templates: dict[str, str] = {}
+        #: True when ``keep_app`` left a process this job started running.
+        self.kept_running = False
+        #: The connect story (what was tried, what failed) -- reported by the
+        #: probe job and written into diagnose.md on a connect failure.
+        self.connectivity: dict[str, Any] = {
+            "reachable": False,
+            "launchable": None,
+            "last_error": None,
+            "connected_via": None,
+            "owned": False,
+            "pid": None,
+            "attach_error": None,
+            "activation": None,
+            "launch": None,
+            "elapsed_s": 0.0,
+            "diagnose_md": None,
+        }
 
     # -- lifecycle --------------------------------------------------------- #
     def __enter__(self) -> "SolidWorksSession":
         import pythoncom  # noqa: PLC0415
-        import win32com.client  # noqa: PLC0415
+        import win32com.client  # noqa: PLC0415,F401  (import early: clearer error)
 
         self._pythoncom = pythoncom
         pythoncom.CoInitialize()
-        before = _sldworks_pids()
-        log(f"SolidWorks processes before connect: {sorted(before) if before is not None else 'unavailable'}")
-
-        raw: Any = None
+        connect_started = time.monotonic()
+        before, enum_error = _enumerate_sldworks_processes()
+        log(f"SolidWorks processes before connect: {_format_process_list(before, enum_error)}")
         try:
-            raw = pythoncom.GetActiveObject(PROGID)
-            self.attached = True
-            log("attached to the running SolidWorks instance (COM ROT)")
-        except Exception as exc:  # noqa: BLE001 - no instance is a normal case
-            log(f"no reachable SolidWorks instance ({exc})")
-            try:
-                raw = win32com.client.DispatchEx(PROGID)
-                self._dispatch_created = True
-                log("created a new SolidWorks instance via DispatchEx")
-            except Exception as dispatch_error:  # noqa: BLE001 - restricted token
-                log(f"DispatchEx failed ({dispatch_error}); starting SLDWORKS.exe directly")
-                raw, self._launch_pid, self.attached = self._launch(before)
+            self._connect(before)
+            self._finish_connect(before)
+        except DriverError as exc:
+            self._fail_connect(exc, before, enum_error, connect_started)
+            raise
+        return self
 
+    def _connect(self, before: set[int] | None) -> None:
+        """attach -> retry COM activation -> launch SLDWORKS.exe and poll the ROT."""
+        try:
+            raw = self._pythoncom.GetActiveObject(PROGID)
+        except Exception as exc:  # noqa: BLE001 - no instance is a normal case
+            attach_error = _com_error_label(exc)
+            self.connectivity["attach_error"] = attach_error
+            log(f"no reachable SolidWorks instance ({attach_error})")
+        else:
+            self.attached = True
+            self.connectivity.update(reachable=True, last_error=None, connected_via="attach")
+            log("attached to the running SolidWorks instance (COM ROT)")
+            self._adopt(raw)
+            return
+
+        activation = _activate_with_retry(self.options)
+        self.connectivity["activation"] = {
+            key: value for key, value in activation.items() if key != "raw"
+        }
+        if activation["ok"]:
+            self._dispatch_created = True
+            self.connectivity.update(launchable=True, last_error=None, connected_via="activation")
+            log(
+                f"created a new SolidWorks instance via DispatchEx "
+                f"(attempt {activation['attempt']}/{activation['attempts']})"
+            )
+            self._adopt(activation["raw"])
+            return
+
+        self.connectivity["last_error"] = (
+            activation["errors"][-1] if activation["errors"] else "COM activation failed"
+        )
+        log("DispatchEx could not start the server; starting SLDWORKS.exe directly")
+        raw, launch_meta = self._launch(before)
+        self.connectivity["launch"] = launch_meta
+        self.connectivity.update(launchable=True, last_error=None, connected_via="launch")
+        self._adopt(raw)
+
+    def _adopt(self, raw: Any) -> None:
+        """Wrap a raw PyIDispatch and read the process id from it."""
         self.sw = _wrap_dynamic(raw)
         self.pid = int(_f(member(self.sw, "GetProcessID", default=0)) or 0)
+
+    def _finish_connect(self, before: set[int] | None) -> None:
+        """Ownership, revision and visibility once COM answers."""
         if self._launch_pid is not None:
             # The launcher is ours; if COM answered with a different pid it handed
             # us the pre-existing single instance, which must not be quit.
@@ -457,8 +1170,16 @@ class SolidWorksSession:
             self.owned = bool(before is None or (self.pid and self.pid not in before))
         else:
             self.owned = False
+        connected_via = self.connectivity.get("connected_via") or (
+            "attach" if self.attached else "launch"
+        )
+        self.connectivity.update(owned=self.owned, pid=self.pid or None, connected_via=connected_via)
         self.revision = str(try_member(self.sw, "RevisionNumber", default="") or "")
-        self.build_numbers = [int(value) for value in as_list(try_member(self.sw, "GetBuildNumbers2")) if isinstance(value, (int, float))]
+        self.build_numbers = [
+            int(value)
+            for value in as_list(try_member(self.sw, "GetBuildNumbers2"))
+            if isinstance(value, (int, float))
+        ]
         if not self.visible():
             try:
                 self.sw.Visible = False
@@ -467,9 +1188,41 @@ class SolidWorksSession:
                 log(f"could not hide the SolidWorks window: {exc}", "WARN")
         log(
             f"connected pid={self.pid} owned={self.owned} attached={self.attached} "
+            f"keep_app={self.exit_plan()['keep_app']} "
             f"revision={self.revision!r} build_numbers={self.build_numbers}"
         )
-        return self
+
+    def _fail_connect(
+        self,
+        error: "DriverError",
+        before: set[int] | None,
+        enum_error: str | None,
+        connect_started: float,
+    ) -> None:
+        """Enrich a connect failure: log tail in the hint, diagnose.md on disk."""
+        self.connectivity["elapsed_s"] = round(time.monotonic() - connect_started, 3)
+        _append_log_tail(error, 20)
+        diagnose_path: Path | None = None
+        try:
+            context = _diagnose_context(error, self.connectivity, before=before, enum_error=enum_error)
+            diagnose_path = _write_diagnose_md(context)
+        except Exception as exc:  # noqa: BLE001 - diagnostics must not mask the failure
+            log(f"could not collect the connect diagnostics: {exc}", "WARN")
+        context_data = dict(error.context or {})
+        context_data.setdefault("connectivity", dict(self.connectivity))
+        if diagnose_path is not None:
+            context_data["diagnose_md"] = str(diagnose_path)
+            self.connectivity["diagnose_md"] = str(diagnose_path)
+            error.hint = (
+                f"{error.hint}\ndiagnose: {diagnose_path}" if error.hint else f"diagnose: {diagnose_path}"
+            )
+            log(f"connect diagnose written to {diagnose_path}", "ERROR")
+        error.context = context_data
+        if self._pythoncom is not None:
+            try:
+                self._pythoncom.CoUninitialize()
+            except Exception:  # noqa: BLE001
+                pass
 
     def __exit__(self, *_exc_info: Any) -> None:
         for name, args in reversed(self._restore):
@@ -479,15 +1232,40 @@ class SolidWorksSession:
             except Exception as exc:  # noqa: BLE001 - restoring is best effort
                 log(f"restoring preference {name}{args} failed: {exc}", "WARN")
         self._close_documents()
-        if self.owned:
-            self._quit_owned_instance()
-        else:
+        plan = self.exit_plan()
+        if not plan["own_app"]:
             log("SolidWorks session was not started by this job; left open (only this job's documents were closed)")
+        elif plan["keep_app"]:
+            # Report P0-3: reuse the instance instead of quitting it and racing a
+            # cold start on the next job.  The documents above are already closed.
+            self.kept_running = True
+            log(
+                f"keep_app: leaving SolidWorks pid {self.pid} running for the next job "
+                f"(ExitApp skipped, licensed instance kept warm)"
+            )
+        else:
+            self._quit_owned_instance(plan["settle_s"])
         if self._pythoncom is not None:
             try:
                 self._pythoncom.CoUninitialize()
             except Exception:  # noqa: BLE001
                 pass
+
+    def exit_plan(self) -> dict:
+        """What this session does to the application on exit (pure: testable).
+
+        ``keep_app`` is a job option (``keep_app: true``) or ``$SWNX_KEEP_APP=1``;
+        it only matters for an instance this job started (``owned``).  An
+        instance the user was already running is never quit either way.
+        """
+        keep = _keep_app(self.options)
+        quit_app = bool(self.owned and not keep)
+        return {
+            "own_app": bool(self.owned),
+            "keep_app": bool(keep),
+            "quit_app": quit_app,
+            "settle_s": _settle_seconds(self.options) if quit_app else 0.0,
+        }
 
     def track(self, document: Any) -> None:
         """Remember a document this job opened so the session can close it."""
@@ -541,18 +1319,32 @@ class SolidWorksSession:
         documents = try_member(self.sw, "GetDocuments")
         return len(as_list(documents)) if documents is not None else None
 
-    def _quit_owned_instance(self) -> None:
+    def _quit_owned_instance(self, settle_s: float = DEFAULT_EXIT_SETTLE) -> None:
+        """ExitApp (+ taskkill fallback), wait for the process to disappear, then settle.
+
+        ``settle_s`` is the quiet time after the process is gone (report P0-3:
+        SolidWorks refused to start again when it was quit and relaunched back to
+        back; the teardown needs a moment even after the PID disappears).
+        """
+        exit_timeout = _option_float(
+            self.options, "exit_timeout", "SWNX_SW_EXIT_TIMEOUT", DEFAULT_EXIT_TIMEOUT
+        )
         log(f"ExitApp on the SolidWorks instance this job started (pid {self.pid})")
         try:
             self.sw.ExitApp()
         except Exception as exc:  # noqa: BLE001 - fall through to the wait/kill below
             log(f"ExitApp raised: {exc}", "WARN")
-        if _wait_for_process_exit(self.pid, 10.0):
+        if _wait_for_process_exit(self.pid, exit_timeout):
             log("SolidWorks process exited after ExitApp")
+            _settle_after_exit(settle_s)
             return
         # A batch-owned instance must not leak a licence seat or block the next job;
         # killing *our own* process is safe (an attached user session is never killed).
-        log(f"SolidWorks pid {self.pid} still alive 10s after ExitApp; terminating this job's own instance", "WARN")
+        log(
+            f"SolidWorks pid {self.pid} still alive {exit_timeout:.0f}s after ExitApp; "
+            "terminating this job's own instance",
+            "WARN",
+        )
         try:
             completed = subprocess.run(
                 ["taskkill", "/PID", str(self.pid), "/T", "/F"],
@@ -566,8 +1358,9 @@ class SolidWorksSession:
             return
         detail = (completed.stdout or completed.stderr or "").strip().splitlines()
         log(f"taskkill exit={completed.returncode} output={detail[:2]}")
-        if _wait_for_process_exit(self.pid, 10.0):
+        if _wait_for_process_exit(self.pid, exit_timeout):
             log("SolidWorks process terminated with taskkill")
+            _settle_after_exit(settle_s)
             return
         log(f"SolidWorks pid {self.pid} still listed after taskkill", "WARN")
 
@@ -577,18 +1370,27 @@ class SolidWorksSession:
         return os.environ.get("SWNX_SW_VISIBLE") == "1"
 
     # -- launch ------------------------------------------------------------ #
-    def _launch(self, before: set[int] | None) -> tuple[Any, int | None, bool]:
-        """Start SLDWORKS.exe and wait for it to register in the ROT.
+    def _launch(self, before: set[int] | None) -> tuple[Any, dict]:
+        """Start SLDWORKS.exe and *poll* the ROT until it registers.
 
         ``CoCreateInstance`` of the SolidWorks local server can be refused by a
         restricted token/AppContainer (CO_E_SERVER_EXEC_FAILURE) even though the
         executable runs fine, so the executable is started directly and the
         driver polls for its COM registration.
-        """
-        import win32com.client  # noqa: PLC0415
 
+        The old code waited once for 420 s, which turned a dead launcher into a
+        seven-minute silent failure (report P0-2).  Now the launcher process is
+        watched (a nonzero exit fails immediately, with the exit code) and the
+        ROT is polled every ``rot_poll`` seconds until ``connect_timeout``
+        (default 90 s, ``$SWNX_SW_ATTACH_TIMEOUT``).  "Never started", "started
+        but died" and "still running but not in the ROT" get different hints.
+        """
         exe = self._exe_path()
-        log(f"starting {exe}")
+        timeout = _option_float(
+            self.options, "connect_timeout", "SWNX_SW_ATTACH_TIMEOUT", DEFAULT_ATTACH_TIMEOUT
+        )
+        interval = _option_float(self.options, "rot_poll", "SWNX_SW_ROT_POLL", DEFAULT_ROT_POLL)
+        log(f"starting {exe} (COM registration budget {timeout:.1f}s, poll {interval:.1f}s)")
         try:
             process = subprocess.Popen(
                 [str(exe)],
@@ -606,27 +1408,107 @@ class SolidWorksSession:
             ) from exc
         self._launch_pid = process.pid
         self._log_prelaunch_baseline(before)
-        timeout = float(self.options.get("connect_timeout", 420.0))
-        deadline = time.monotonic() + timeout
         started = time.monotonic()
-        last_error: Exception | None = None
-        while time.monotonic() < deadline:
-            try:
-                raw = self._pythoncom.GetActiveObject(PROGID)
-            except Exception as exc:  # noqa: BLE001 - not registered yet
-                last_error = exc
-                time.sleep(1.0)
-                continue
-            # GetActiveObject hands back a raw PyIDispatch: wrap it before reading
-            # members (raw PyIDispatch has no pywin32 property/method semantics).
+
+        def probe() -> Any:
+            return self._pythoncom.GetActiveObject(PROGID)
+
+        def on_error(count: int, exc: Exception) -> None:
+            # One line at the start and then every 10 s is enough; 45 identical
+            # lines would bury the interesting lines of the job log.
+            if count == 1 or count % 5 == 0:
+                log(f"waiting for the SolidWorks COM ROT ({_com_error_label(exc)})")
+
+        raw, meta = _poll_for_rot(
+            probe,
+            timeout=timeout,
+            interval=interval,
+            launcher=process.poll,
+            on_error=on_error,
+        )
+        last_error = meta.get("last_error")
+        launch_meta = {
+            "attempted": True,
+            "pid": process.pid,
+            "registered": raw is not None,
+            "polls": meta["polls"],
+            "elapsed_s": meta["elapsed_s"],
+            "launcher_exited": meta["launcher_exited"],
+            "launcher_exit_code": meta["launcher_exit_code"],
+            "last_error": _com_error_label(last_error) if last_error is not None else None,
+        }
+        self.connectivity["launch"] = launch_meta
+        if raw is not None:
             wrapped = _wrap_dynamic(raw)
             pid = int(_f(try_member(wrapped, "GetProcessID", default=0)) or 0)
             log(f"SolidWorks registered in the ROT after {time.monotonic() - started:.1f}s (pid {pid})")
-            return wrapped, process.pid, pid == process.pid
+            self.connectivity["last_error"] = None
+            return raw, launch_meta
+        if meta["launcher_exited"]:
+            code = meta["launcher_exit_code"]
+            if code:
+                message = (
+                    f"the SLDWORKS.exe launcher (pid {process.pid}) exited with code {code} "
+                    f"before registering in the COM ROT"
+                )
+                self.connectivity["last_error"] = message
+                self.connectivity["launch"] = launch_meta
+                raise DriverError(
+                    message,
+                    detail=(
+                        f"launcher survived {meta['elapsed_s']:.1f}s; "
+                        f"last COM error: {launch_meta['last_error'] or 'none'}"
+                    ),
+                    hint=(
+                        "SolidWorks died during startup. Check the licence/login state, a pending "
+                        "message box, and that SLDWORKS.exe starts by hand; report P0-3 describes "
+                        "this after repeated COM start/stop. Retry with SWNX_KEEP_APP=1 so the next "
+                        "job reuses the instance instead of cold-starting it."
+                    ),
+                )
+            # Exit code 0 can be a hand-off to a child server: give the ROT a short
+            # grace before calling it a failure, so a clean bootstrap is not lost.
+            grace = min(max(timeout - meta["elapsed_s"], 2.0), 10.0)
+            log(f"launcher exited cleanly without a COM server; polling the ROT {grace:.0f}s more for a hand-off")
+            raw, meta2 = _poll_for_rot(probe, timeout=grace, interval=interval)
+            launch_meta["polls"] += meta2["polls"]
+            launch_meta["elapsed_s"] = round(meta["elapsed_s"] + meta2["elapsed_s"], 3)
+            if raw is not None:
+                launch_meta["registered"] = True
+                self.connectivity["last_error"] = None
+                return raw, launch_meta
+            self.connectivity["last_error"] = (
+                "SLDWORKS.exe started and exited cleanly but no COM server registered "
+                f"within {timeout:.1f}s"
+            )
+            self.connectivity["launch"] = launch_meta
+            raise DriverError(
+                self.connectivity["last_error"],
+                detail=f"launcher exited with code 0 after {meta['elapsed_s']:.1f}s; no ROT entry appeared",
+                hint=(
+                    "The executable exits cleanly without a COM server. Check the SolidWorks "
+                    "licence/login state and run `swnx-switch probe --deep` for the decoded COM errors."
+                ),
+            )
+        alive = _process_alive(process.pid)
+        launch_meta["launcher_alive"] = alive
+        self.connectivity["launch"] = launch_meta
+        self.connectivity["last_error"] = (
+            f"SolidWorks did not register in the COM ROT within {timeout:.1f}s "
+            f"(launcher pid {process.pid})"
+        )
         raise DriverError(
-            f"SolidWorks did not register in the COM ROT within {timeout:.0f}s (launcher pid {process.pid})",
-            detail=str(last_error) if last_error else None,
-            hint="check the SolidWorks licence/login dialogs, or start SolidWorks manually first",
+            self.connectivity["last_error"],
+            detail=(
+                f"launcher pid {process.pid} still alive={alive} after {timeout:.1f}s; "
+                f"last COM error: {launch_meta['last_error'] or 'none'}"
+            ),
+            hint=(
+                "SLDWORKS.exe is running but its COM server never registered: a licence/login "
+                "dialog or a hung start is the usual cause (report P0-2). Check the desktop for a "
+                "SolidWorks dialog, or start SolidWorks by hand first, then retry. The launcher is "
+                "left running so diagnose.md can list it; close it by hand if it is stuck."
+            ),
         )
 
     def _log_prelaunch_baseline(self, before: set[int] | None) -> None:
@@ -1096,10 +1978,23 @@ class SolidWorksSession:
 
 
 def _wrap_dynamic(raw: Any) -> Any:
-    """Wrap whatever COM handed us so properties and methods read uniformly."""
+    """Wrap whatever COM handed us so properties and methods read uniformly.
+
+    ``pythoncom.GetActiveObject`` returns a bare ``PyIUnknown`` (the ROT stores
+    IUnknown), and a dynamic wrapper built on that fails later with
+    ``'PyIUnknown' object has no attribute 'GetIDsOfNames'``.  Query for
+    ``IDispatch`` first — that is what the high-level
+    ``win32com.client.GetActiveObject`` does internally.
+    """
     from win32com.client import dynamic  # noqa: PLC0415
 
     ole = getattr(raw, "_oleobj_", raw)
+    try:
+        import pythoncom  # noqa: PLC0415
+
+        ole = ole.QueryInterface(pythoncom.IID_IDispatch)
+    except Exception:  # noqa: BLE001 - already an IDispatch, or a duck-typed test double
+        pass
     try:
         return dynamic.DumbDispatch(ole, PROGID)
     except Exception as exc:  # noqa: BLE001 - the native wrapper also works with member()
@@ -1900,72 +2795,142 @@ def _read_build_numbers(sw: Any) -> dict:
 
 
 def job_probe(request: dict) -> dict:
-    """Report the SolidWorks build and the exchange/import capabilities."""
-    options = request.get("options") or {}
-    with SolidWorksSession(options) as session:
-        sw = session.sw
-        build = _read_build_numbers(sw)
-        raw_executable = str(try_member(sw, "GetExecutablePath", default="") or "")
-        executable = Path(raw_executable) if raw_executable else None
-        # GetExecutablePath returns the install *directory* on 2025 SP05; accept
-        # both shapes so the report is right on either.
-        install_root = None
-        if executable is not None:
-            install_root = executable if executable.is_dir() else executable.parent
-        exe = (install_root / "SLDWORKS.exe") if install_root else None
-        translator_modules = {
-            name: bool(install_root and (install_root / name).exists())
-            for name in ("sldstepu.dll", "sldxtkitu.dll", "sldxtoolkitu.dll", "sldigesu.dll")
-        }
-        info: dict[str, Any] = {
-            "revision": session.revision,
-            "build_numbers": build["values"],
-            "build_numbers_read": build,
-            "year": session.app_year(),
-            "app_label": session.app_label(),
-            "executable_path": str(exe) if exe is not None and exe.exists() else raw_executable,
-            "executable_file_version": _exe_file_version(exe) if exe is not None and exe.exists() else None,
-            "install_root": str(install_root) if install_root is not None else None,
-            "process_id": session.pid,
-            "connected_via": "attach" if session.attached else "launch",
-            "process_owned": session.owned,
-            "3d_interconnect_enabled": session._get_toggle(SW_TOGGLE_3D_INTERCONNECT),
-            "step_ap": session.step_ap(),
-            "default_templates": {
-                label: try_member(sw, "GetUserPreferenceStringValue", preference, default="")
-                for preference, (label, _pattern) in SW_PREF_TEMPLATE.items()
-            },
-            "open_documents": [
-                str(try_member(document, "GetTitle", default=""))
-                for document in as_list(try_member(sw, "GetDocuments"))
-            ],
-            "translator_modules": translator_modules,
-            # Module presence is informational; the export/import jobs are what
-            # actually verify STEP (ISO-10303 + ADVANCED_FACE) and Parasolid
-            # (TRANSMIT FILE) output on this seat.
-            "capabilities": {
-                "step_translator_module": translator_modules["sldstepu.dll"],
-                "parasolid_module_candidates": [
-                    name for name in ("sldxtkitu.dll", "sldxtoolkitu.dll") if translator_modules[name]
+    """Report the SolidWorks build and the exchange/import capabilities.
+
+    ``options.deep`` (``probe --deep`` and the pipeline preflight) turns this into
+    an *honest* runnability check: short attach/activation budget, launcher-exit
+    fast-fail, and a result that always carries the ``connectivity`` tri-state --
+    ``reachable`` (an instance already answered), ``launchable`` (activation /
+    launch produced a COM server) and ``last_error`` -- even when the connect
+    failed.  That is what "available" alone could never answer (report P1-3).
+    """
+    options = dict(request.get("options") or {})
+    deep = bool(options.get("deep"))
+    if deep:
+        options = _deep_probe_options(options)
+    started = time.monotonic()
+    session: SolidWorksSession | None = None
+    try:
+        with SolidWorksSession(options) as session:
+            sw = session.sw
+            build = _read_build_numbers(sw)
+            raw_executable = str(try_member(sw, "GetExecutablePath", default="") or "")
+            executable = Path(raw_executable) if raw_executable else None
+            # GetExecutablePath returns the install *directory* on 2025 SP05; accept
+            # both shapes so the report is right on either.
+            install_root = None
+            if executable is not None:
+                install_root = executable if executable.is_dir() else executable.parent
+            exe = (install_root / "SLDWORKS.exe") if install_root else None
+            translator_modules = {
+                name: bool(install_root and (install_root / name).exists())
+                for name in ("sldstepu.dll", "sldxtkitu.dll", "sldxtoolkitu.dll", "sldigesu.dll")
+            }
+            info: dict[str, Any] = {
+                "revision": session.revision,
+                "build_numbers": build["values"],
+                "build_numbers_read": build,
+                "year": session.app_year(),
+                "app_label": session.app_label(),
+                "executable_path": str(exe) if exe is not None and exe.exists() else raw_executable,
+                "executable_file_version": _exe_file_version(exe) if exe is not None and exe.exists() else None,
+                "install_root": str(install_root) if install_root is not None else None,
+                "process_id": session.pid,
+                "connected_via": session.connectivity.get("connected_via")
+                or ("attach" if session.attached else "launch"),
+                "process_owned": session.owned,
+                "keep_app": bool(session.exit_plan()["keep_app"]),
+                "deep": deep,
+                "connectivity": dict(session.connectivity),
+                "3d_interconnect_enabled": session._get_toggle(SW_TOGGLE_3D_INTERCONNECT),
+                "step_ap": session.step_ap(),
+                "default_templates": {
+                    label: try_member(sw, "GetUserPreferenceStringValue", preference, default="")
+                    for preference, (label, _pattern) in SW_PREF_TEMPLATE.items()
+                },
+                "open_documents": [
+                    str(try_member(document, "GetTitle", default=""))
+                    for document in as_list(try_member(sw, "GetDocuments"))
                 ],
-                "iges_module": translator_modules["sldigesu.dll"],
-                "verified_by": "export/import jobs (file header + entity checks on disk)",
-            },
-        }
-        log(
-            f"probe: revision={session.revision} file_version={info['executable_file_version']} "
-            f"build_numbers={build['values']} modules={translator_modules}"
-        )
-        log("TOKEN PROBE_OK")
+                "translator_modules": translator_modules,
+                # Module presence is informational; the export/import jobs are what
+                # actually verify STEP (ISO-10303 + ADVANCED_FACE) and Parasolid
+                # (TRANSMIT FILE) output on this seat.
+                "capabilities": {
+                    "step_translator_module": translator_modules["sldstepu.dll"],
+                    "parasolid_module_candidates": [
+                        name for name in ("sldxtkitu.dll", "sldxtoolkitu.dll") if translator_modules[name]
+                    ],
+                    "iges_module": translator_modules["sldigesu.dll"],
+                    "verified_by": "export/import jobs (file header + entity checks on disk)",
+                },
+            }
+            log(
+                f"probe: revision={session.revision} file_version={info['executable_file_version']} "
+                f"build_numbers={build['values']} modules={translator_modules} deep={deep}"
+            )
+            log("TOKEN PROBE_OK")
+            app = session.app_label()
+            revision = session.revision
+            kept_running = session.kept_running
+        info["app_kept_running"] = bool(kept_running)
         return {
             "ok": True,
             "kind": "probe",
-            "app": session.app_label(),
-            "app_version": session.revision,
+            "app": app,
+            "app_version": revision,
             "outputs": [],
             "warnings": [],
             "error": None,
             "probe": info,
+            "duration_s": round(time.monotonic() - started, 3),
+        }
+    except DriverError as exc:
+        if not deep:
+            raise
+        context = dict(exc.context or {})
+        connectivity = dict((session.connectivity if session is not None else None) or context.get("connectivity") or {})
+        connectivity.setdefault("reachable", False)
+        connectivity.setdefault("launchable", False)
+        connectivity["last_error"] = connectivity.get("last_error") or str(exc)
+        connectivity["deep"] = True
+        log(f"deep probe could not connect: {exc}", "WARN")
+        return {
+            "ok": False,
+            "kind": "probe",
+            "app": "SolidWorks",
+            "app_version": "unknown",
+            "outputs": [],
+            "warnings": [str(exc)],
+            "error": str(exc),
+            "hint": exc.hint,
+            "detail": exc.detail,
+            "probe": {
+                "deep": True,
+                "connectivity": connectivity,
+                "connect_error": str(exc),
+                "diagnose_md": context.get("diagnose_md"),
+            },
+            "duration_s": round(time.monotonic() - started, 3),
+        }
+    except Exception as exc:  # noqa: BLE001 - a probe must report, not crash
+        if not deep:
+            raise
+        log(f"deep probe raised unexpectedly: {type(exc).__name__}: {exc}", "WARN")
+        return {
+            "ok": False,
+            "kind": "probe",
+            "app": "SolidWorks",
+            "app_version": "unknown",
+            "outputs": [],
+            "warnings": [f"{type(exc).__name__}: {exc}"],
+            "error": f"{type(exc).__name__}: {exc}",
+            "probe": {
+                "deep": True,
+                "connectivity": {"reachable": False, "launchable": False, "last_error": str(exc), "deep": True},
+                "connect_error": f"{type(exc).__name__}: {exc}",
+            },
+            "duration_s": round(time.monotonic() - started, 3),
         }
 
 
@@ -2003,6 +2968,7 @@ def job_read(request: dict) -> dict:
         "error": None,
         "ir": doc,
         "summary": summary,
+        "app_kept_running": bool(session.kept_running),
         "duration_s": round(time.monotonic() - started, 3),
     }
 
@@ -2075,6 +3041,7 @@ def job_export(request: dict) -> dict:
         "error": None,
         "export": provenance,
         "ir": ir_doc,
+        "app_kept_running": bool(session.kept_running),
         "duration_s": round(time.monotonic() - started, 3),
     }
 
@@ -2156,6 +3123,7 @@ def job_import(request: dict) -> dict:
         "error": None,
         "import": provenance,
         "ir": doc,
+        "app_kept_running": bool(session.kept_running),
         "duration_s": round(time.monotonic() - started, 3),
     }
 
@@ -2217,6 +3185,11 @@ def _entry(argv: list[str] | None = None) -> int:
             payload["hint"] = exc.hint
         if exc.detail is not None:
             payload["detail"] = exc.detail
+        if getattr(exc, "context", None):
+            context = dict(exc.context)
+            payload["context"] = context
+            if context.get("diagnose_md"):
+                payload["diagnose_md"] = context["diagnose_md"]
         log(f"ERROR {type(exc).__name__}: {exc}", "ERROR")
         if exc.hint:
             log(f"HINT {exc.hint}", "ERROR")
