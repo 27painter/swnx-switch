@@ -169,9 +169,9 @@ python -m swnx_switch.ai.mcp_server
 |---|---|---|---|
 | `swnx_probe` | `deep?` | 环境 + backend 状态；`deep=true` 时包含 launchable/reachable/last_error | <1 s / 5–20 s |
 | `swnx_read_part` | `path`、`via?`、`save_ir?`、`brief?`、`keep_app?` | 摘要 + IR 路径 + 简报（不再回传 IR 全文） | 8–60 s |
-| `swnx_convert_part` | `source`、`target`、`mode?`、`step_variant?`、`force?`、`report?`、`tolerance?`、`keep_app?`、`preflight?` | verdict + 关键检查 + 目标 sha256 + 报告路径 | 1–5 min |
+| `swnx_convert_part` | `source`、`target`、`mode?`、`step_variant?`、`force?`、`report?`、`tolerance?`、`keep_app?`、`preflight?`、`report_dir?` | verdict + 关键检查 + 目标 sha256 + 实际落盘路径 + 报告路径 | 1–5 min |
 | `swnx_convert_start` | 同上 | 立即返回 `job_id`，后台执行 | 毫秒级返回 |
-| `swnx_job_status` | `job_id` | state / stage / elapsed_s / 已完成阶段 / 完成后精简结果 | 毫秒级 |
+| `swnx_job_status` | `job_id` | state / stage / elapsed_s / 各阶段时间点与 `delta_s`（带 backend 标签）/ 完成后精简结果 | 毫秒级 |
 | `swnx_compare_parts` | `reference`、`candidate`、`tolerance?` | 对比结果 | 秒级 |
 | `swnx_part_brief` | `ir` | Markdown 简报 | <1 s |
 | `swnx_list_routes` | — | 路线表 | <1 s |
@@ -356,6 +356,7 @@ AI 会依次调 `swnx_probe` →（可选 `swnx_read_part`）→ `swnx_convert_s
 | 第二次转换卡住约 7 分钟才报 `CO_E_SERVER_EXEC_FAILURE` | 旧版：SW 刚退出就再激活，且只做一次 420 s 长等 | 0.2.0 已改为退避重试 + 90 s ROT 轮询；仍失败看该作业目录下的 `diagnose.md` |
 | 连续转换后 `SLDWORKS.exe` 启动即退出 | 反复 COM 启停触发单实例/许可释放竞争 | 加 `--keep-app`（或 `keep_app=true`）复用同一实例；必要时手动启动一次 SW |
 | `probe` 说 available 但实际起不来 | 旧版 available 只证明 exe/ProgID 存在 | 用 `probe --deep`：会返回 launchable/reachable/last_error |
+| `probe --deep` 报 `value is not lossless JSON` | 0.2.0 的出口清洗漏了 `-0.0`（deep 探针 payload 里有 NX 面轴的 `-0.0`） | 0.2.1 已修：`-0.0` 归一为 `0.0`，超 2^53 整数转字符串；`wire.scan()` 做回归 |
 
 **驱动层三个坑（已绕过，勿改回）**：
 SolidWorks 不能用 `OpenDoc6` 打开外来 `.prt`/`.x_t`（会打死 COM 服务器，必须
@@ -389,7 +390,7 @@ CLI / MCP / DSH 插件 / skill
 | `plugin/` | DSH 插件包（注册一行 MCP；含 linked 插件的 peer 解析） |
 | `skills/swnx-switch/` | 给 AI 的操作手册 |
 | `scripts/` | `verify_e2e.py` / `run_tests.py` / `menu.ps1` |
-| `tests/` | IR、MCP 协议、严格 JSON、作业、校验器（131 项，无需 CAD） |
+| `tests/` | IR、MCP 协议、严格 JSON、作业、校验器（138 项，无需 CAD） |
 | `docs/` | 架构 / 可行性 / 社区调研 / 限制 / 可靠性 / 证据 |
 
 扩展新 CAD：实现 `Backend` 子类（`available` / `app_version` / `_command`）→ 写读 `SWNX_REQUEST`、
@@ -398,7 +399,7 @@ CLI / MCP / DSH 插件 / skill
 ## 13. 开发与测试
 
 ```bat
-:: 全量测试（无第三方依赖，131 项）
+:: 全量测试（无第三方依赖，138 项）
 python scripts\run_tests.py
 
 :: 有 pytest 时
@@ -431,7 +432,7 @@ python scripts\verify_e2e.py --mode parasolid --force
 
 ## 15. 版本与路线图
 
-**0.2.0（当前）**：在 0.1.0 的双向转换/校验之上，按真实使用报告补可靠性：
+**0.2.1（当前）**：0.2.1 修掉 `probe --deep` 的唯一遗留报错（出口清洗漏 `-0.0`），并把阶段耗时、实际落盘名、同名旧文件提示、`report_dir` 补齐；138 项测试。\n\n**0.2.0**：在 0.1.0 的双向转换/校验之上，按真实使用报告补可靠性：
 严格 JSON 出口与瘦身返回值、异步作业（`convert_start` + `job_status`）、SolidWorks COM 重试与
 ROT 轮询、`--keep-app` 实例复用、`diagnose.md`、三态 `probe --deep`、报告就近、入口校验。
 131 项自动化测试。

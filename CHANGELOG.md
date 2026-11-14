@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.2.1 — 2026-11-14
+
+第二次真机使用报告（14:20–14:33，NX → SolidWorks 一次成功、PASS）的收尾：`swnx_probe {deep:true}`
+仍被判过一次 `invalid output: value is not lossless JSON`，另有 5 条小改进。逐条对照见
+[docs/reliability.md](docs/reliability.md) 第 9 节。
+
+### 修复
+
+- **`probe` deep 仍报 not lossless JSON**：真凶是 **`-0.0`**。宿主把 `-0` 视为非无损 JSON；
+  `json.dumps` 会原样写出 `-0.0`，而旧 `wire.dumps` 的"先直接序列化、失败再清洗"快路径因此漏掉它
+  （`-0.0` 在 Python 里是合法 JSON，不会触发清洗）。`wire.sanitize` 现在把 `-0.0` 归一为 `0.0`、
+  把超过 2^53 的整数转成字符串，`wire.dumps` 改为**总是**先清洗再序列化。
+  复现/验证脚本：`work/verify/probe_wire_scan.py`（修复前 deep 负载里 6 处 `-0.0`，修复后 clean）。
+- 新增 `wire.scan()`：按宿主规则逐值检查（NaN / Infinity / `-0.0` / 超范围整数），测试与验证脚本共用同一规则。
+
+### 改进（来自报告建议 2–6）
+
+- `swnx_job_status` 的阶段列表直接给出 **`delta_s`**（每段耗时），并带 `backend` / `exchange` 标签，
+  不需要调用方自己做减法（建议 2、3）。
+- 转换结果回显**实际落盘路径** `target_written`：SolidWorks 可能把 `x.sldprt` 存成 `x.SLDPRT`，
+  脚本按名字精确匹配时不再踩坑（建议 4）。
+- 目标目录存在**同名不同后缀**的文件时给 warning（旧产物容易点错，建议 5）。
+- MCP 工具参数新增 **`report_dir`**（批量场景集中放报告，建议 6）。
+- 新增**协议级回归测试**：每个工具的真实 MCP 响应逐行按无损 JSON 规则扫描（建议 1）。
+
+### 测试
+
+138 项（新增 7 项：`-0.0`/超范围整数、scan、阶段标签、全工具协议扫描、`delta_s`、落盘名与同名文件）。
+
 ## 0.2.0 — 2026-11-14
 
 可靠性版本：按一份真实调用方的使用报告（桌面 `swnx-switch使用体验与改进建议报告.md`）逐项修复。

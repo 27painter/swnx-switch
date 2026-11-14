@@ -158,6 +158,9 @@ def cmd_convert(args: argparse.Namespace) -> int:
         print(f"转换 (convert) {result.source_format} -> {result.target_format}")
         print(f"  源 source   {result.source}")
         print(f"  目标 target {result.target}")
+        written = result.paths.get("target_written")
+        if written and str(written) != str(result.target):
+            print(f"  实际写入 written {written}")
         for attempt in result.attempts:
             state = "ok" if attempt.ok else "FAILED"
             print(

@@ -245,6 +245,33 @@ def test_metadata_only_mismatch_is_warn_not_fail() -> None:
     assert comparison["summary"]["failed_optional"]
 
 
+def test_written_target_case_and_sibling_warning() -> None:
+    """Report the on-disk spelling and flag same-name files (suggestions 4/5)."""
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    outdir = SCRATCH / "case-target"
+    outdir.mkdir(parents=True, exist_ok=True)
+    actual = outdir / "switch_test1.SLDPRT"
+    actual.write_bytes(b"solidworks saved this")
+    sibling = outdir / "switch_test1.prt"
+    sibling.write_bytes(b"old run output")
+
+    pipeline = Pipeline(workdir=SCRATCH / "work-case", outdir=SCRATCH / "out-case")
+    result = ConversionResult(
+        ok=True,
+        source=SCRATCH / "source.SLDPRT",
+        target=outdir / "switch_test1.sldprt",  # requested lowercase
+        source_format="prt",
+        target_format="sldprt",
+        run_dir=SCRATCH / "run-case",
+    )
+    pipeline._resolve_written_target(result)
+    pipeline._warn_sibling_files(result)
+
+    assert Path(result.paths["target_written"]).name == "switch_test1.SLDPRT"
+    assert any("实际写入名" in warning for warning in result.warnings), result.warnings
+    assert any("switch_test1.prt" in warning for warning in result.warnings), result.warnings
+
+
 if __name__ == "__main__":  # pragma: no cover
     failures = 0
     for name, func in sorted(globals().items()):

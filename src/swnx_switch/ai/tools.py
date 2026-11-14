@@ -72,6 +72,10 @@ _CONVERT_PROPS = {
         "type": "boolean",
         "description": "开始前先做一次深度探测，环境不可用时快速失败（默认 false）",
     },
+    "report_dir": {
+        "type": "string",
+        "description": "报告副本目录；默认写在目标文件旁边（批量场景可集中存放）",
+    },
 }
 
 TOOLS: list[dict] = [
@@ -231,6 +235,7 @@ def _convert(arguments: dict, context: dict) -> dict:
         report=bool(arguments.get("report", True)),
         keep_app=bool(arguments.get("keep_app", False)),
         preflight=bool(arguments.get("preflight", False)),
+        report_dir=arguments.get("report_dir"),
     )
     data = _slim_payload(result)
     return {"ok": result.ok, "text": _clip(_convert_text(result, data)), "data": data, "isError": not result.ok}
@@ -247,6 +252,7 @@ def _convert_start(arguments: dict, context: dict) -> dict:
         "report": bool(arguments.get("report", True)),
         "keep_app": bool(arguments.get("keep_app", False)),
         "preflight": bool(arguments.get("preflight", False)),
+        "report_dir": arguments.get("report_dir"),
     }
 
     def work(progress: Callable[[str, dict], None]) -> dict:
@@ -276,7 +282,7 @@ def _job_status(arguments: dict, context: dict) -> dict:
         f"job {job_id}: state={snapshot['state']} stage={snapshot['stage']} "
         f"elapsed={snapshot['elapsed_s']}s\n"
         + "  stages: "
-        + " -> ".join(f"{entry['stage']}@{entry['at_s']}s" for entry in snapshot["stages"])
+        + " -> ".join(_stage_label(entry) for entry in snapshot["stages"])
     )
     if snapshot["state"] == "done" and snapshot["result"]:
         text += "\n\n" + _result_short_text(snapshot["result"])
@@ -329,6 +335,30 @@ _HANDLERS: dict[str, Callable[[dict, dict], dict]] = {
 # --------------------------------------------------------------------------- #
 # helpers
 # --------------------------------------------------------------------------- #
+def _stage_label(entry: dict) -> str:
+    """One stage as ``export@10.0s(+1.6s)[parasolid]``.
+
+    Time points alone force the caller to subtract to find the slow step
+    (report suggestion 2), and two consecutive ``preflight`` lines are
+    indistinguishable without the backend name (suggestion 3).
+    """
+    stage = entry.get("stage", "?")
+    label = f"{stage}@{entry.get('at_s')}s"
+    if entry.get("delta_s") is not None:
+        label += f"(+{entry['delta_s']}s)"
+    info = entry.get("info") or {}
+    detail = []
+    for key in ("backend", "app", "exchange", "verdict", "ok"):
+        value = info.get(key)
+        if value is not None and value is not True:
+            detail.append(f"{key}={value}")
+        elif value is True:
+            detail.append(key)
+    if detail:
+        label += "[" + ",".join(detail) + "]"
+    return label
+
+
 def _slim_payload(result) -> dict:
     """The small, stable shape a client needs to decide success and next steps."""
     comparison = result.comparison or {}
@@ -353,6 +383,7 @@ def _slim_payload(result) -> dict:
         "verdict": result.verdict,
         "mode": f"{result.source_format}->{result.target_format}",
         "target": str(result.target),
+        "target_written": result.paths.get("target_written"),
         "target_sha256": result.paths.get("target_sha256"),
         "seconds": round(result.seconds, 2),
         "key_checks": key_checks,
@@ -372,6 +403,9 @@ def _convert_text(result, data: dict) -> str:
     lines.append(f"结论 verdict: **{data['verdict']}**  ({data['seconds']} s)")
     if data.get("target"):
         lines.append(f"目标 target: `{data['target']}`")
+    written = data.get("target_written")
+    if written and written != data.get("target"):
+        lines.append(f"实际写入 written: `{written}`")
     if data.get("target_sha256"):
         lines.append(f"SHA-256: `{data['target_sha256'][:32]}…`")
     lines.append("")
@@ -392,6 +426,9 @@ def _result_short_text(data: dict) -> str:
     lines = [f"结论 verdict: **{data.get('verdict')}**  ({data.get('seconds')} s)"]
     if data.get("target"):
         lines.append(f"目标 target: `{data['target']}`")
+    written = data.get("target_written")
+    if written and written != data.get("target"):
+        lines.append(f"实际写入 written: `{written}`")
     lines.append(_key_checks_text(data.get("key_checks") or []))
     if data.get("report_md"):
         lines.append(f"报告 report: `{data['report_md']}`")

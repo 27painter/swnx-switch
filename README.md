@@ -64,7 +64,7 @@ report honestly what was lost.
 | Disk | 1–30 MB of temp files per conversion; `work/` is disposable | — |
 
 No third-party CAD library is required on the Python side (no OCCT / pythonocc / FreeCAD).
-`pytest` is optional: `scripts/run_tests.py` runs all 131 tests with plain Python.
+`pytest` is optional: `scripts/run_tests.py` runs all 138 tests with plain Python.
 
 ## 3. Install and quick start
 
@@ -178,9 +178,9 @@ python -m swnx_switch.ai.mcp_server
 |---|---|---|---|
 | `swnx_probe` | `deep?` | environment + backend state; with `deep=true` also launchable/reachable/last_error | <1 s / 5–20 s |
 | `swnx_read_part` | `path`, `via?`, `save_ir?`, `brief?`, `keep_app?` | summary + IR path + brief (no longer echoes the whole IR) | 8–60 s |
-| `swnx_convert_part` | `source`, `target`, `mode?`, `step_variant?`, `force?`, `report?`, `tolerance?`, `keep_app?`, `preflight?` | verdict + key checks + target sha256 + report path | 1–5 min |
+| `swnx_convert_part` | `source`, `target`, `mode?`, `step_variant?`, `force?`, `report?`, `tolerance?`, `keep_app?`, `preflight?`, `report_dir?` | verdict + key checks + target sha256 + written path + report path | 1–5 min |
 | `swnx_convert_start` | same as above | returns a `job_id` immediately; runs in the background | milliseconds |
-| `swnx_job_status` | `job_id` | state / stage / elapsed_s / stages done / slim result when finished | milliseconds |
+| `swnx_job_status` | `job_id` | state / stage / elapsed_s / per-stage `delta_s` with backend label / slim result | milliseconds |
 | `swnx_compare_parts` | `reference`, `candidate`, `tolerance?` | comparison result | seconds |
 | `swnx_part_brief` | `ir` | Markdown brief | <1 s |
 | `swnx_list_routes` | — | route table | <1 s |
@@ -375,6 +375,7 @@ Full list and the verified/unverified table: [docs/limitations.md](docs/limitati
 | The second conversion hung for ~7 minutes before `CO_E_SERVER_EXEC_FAILURE` | old behaviour: reactivating SW right after exit, with a single 420 s wait | 0.2.0 retries with backoff and polls the ROT for 90 s; see `diagnose.md` in that job's directory if it still fails |
 | `SLDWORKS.exe` exits immediately after several conversions | repeated COM start/stop racing the single-instance/licence teardown | pass `--keep-app` (or `keep_app=true`) to reuse one instance; start SW manually once if needed |
 | `probe` says available but SW cannot start | the old `available` only proved exe/ProgID existed | run `probe --deep`: it reports launchable/reachable/last_error |
+| `probe --deep` fails with `value is not lossless JSON` | 0.2.0 sanitised NaN but not `-0.0`, which NX face axes contain | fixed in 0.2.1: `-0.0` -> `0.0`, integers beyond 2^53 -> strings, `wire.scan()` guards it |
 
 **Three driver traps (already worked around — do not undo)**:
 SolidWorks must not `OpenDoc6` a foreign `.prt`/`.x_t` (it kills the COM server; use
@@ -408,7 +409,7 @@ CLI / MCP / DSH plugin / skill
 | `plugin/` | DSH plugin package (one MCP row; peer resolution for linked installs) |
 | `skills/swnx-switch/` | operating manual for the agent |
 | `scripts/` | `verify_e2e.py` / `run_tests.py` / `menu.ps1` |
-| `tests/` | IR, MCP protocol, validator, strict-JSON and job tests (131 tests, no CAD needed) |
+| `tests/` | IR, MCP protocol, validator, strict-JSON and job tests (138 tests, no CAD needed) |
 | `docs/` | architecture / feasibility / research / limitations / evidence |
 
 Adding another CAD app: subclass `Backend` (`available` / `app_version` / `_command`), write a driver
@@ -418,7 +419,7 @@ that reads `SWNX_REQUEST` and writes `SWNX_RESULT`, register the format in `form
 ## 13. Development and testing
 
 ```bat
-:: full suite (no third-party dependencies, 131 tests)
+:: full suite (no third-party dependencies, 138 tests)
 python scripts\run_tests.py
 
 :: when pytest is available
@@ -459,7 +460,7 @@ design:
 
 ## 15. Version and roadmap
 
-**0.2.0 (current)**: reliability release on top of 0.1.0 — strict JSON tool boundary and slim
+**0.2.1 (current)**: fixes the last `probe --deep` wire failure (sanitiser skipped `-0.0`), reports per-stage `delta_s`, the written file name and same-name siblings, and adds `report_dir`; 138 tests.\n\n**0.2.0**: reliability release on top of 0.1.0 — strict JSON tool boundary and slim
 payloads, async jobs (`convert_start` + `job_status`), SolidWorks COM retry and ROT polling,
 `--keep-app` instance reuse, `diagnose.md`, three-state `probe --deep`, reports beside the target,
 request validation. 131 automated tests.

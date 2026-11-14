@@ -42,6 +42,7 @@ D:\27painter\Documents\swnx-switch\swnx-switch.cmd probe
      拿到 `job_id` 后轮询 `swnx_job_status {"job_id": "..."}`。
      阶段依次是 `source_read → export → import → target_read → validate → report`，
      每 5–10 秒查一次即可，**不要对同一个转换重复 start**。
+     阶段项自带 `delta_s`（每段耗时）与 `backend` 标签，直接读出哪一步慢，不用自己做减法。
    - MCP 同步（短任务/客户端不支持轮询）：`swnx_convert_part {...}`。
    - CLI：`swnx-switch.cmd convert "<源码件>" "<目标件>"`（阶段会打到 stderr）。
    - 默认 `--mode auto`：经过 NX 的路线优先 Parasolid `.x_t`（本机 NX 批处理 STEP 翻译器不可用）。
@@ -62,7 +63,9 @@ D:\27painter\Documents\swnx-switch\swnx-switch.cmd probe
 | 只要读数据 | `read`，不要 convert |
 | 连续转换多个零件 | 加 `keep_app=true` / `--keep-app`，复用同一个 SolidWorks 实例，避免反复冷启动 |
 | 先确认环境能跑再转 | `preflight=true` / `--preflight`，环境不可用时几秒内失败 |
-| 报告放哪 | 默认写在目标文件旁 `<目标名>.validation.md`；可用 `--report-dir` 改 |
+| 报告放哪 | 默认写在目标文件旁 `<目标名>.validation.md`；可用 `--report-dir` / 工具参数 `report_dir` 集中存放 |
+| 实际写出的文件名 | 看返回值 `target_written`：SolidWorks 可能把 `.sldprt` 存成 `.SLDPRT`（Windows 不区分大小写，脚本匹配要注意） |
+| 同目录同名旧文件 | 转换成功会提示同名不同后缀的文件，别把它当成本次产物 |
 | 装配/工程图 | 能读能导，转换只标 `warn`，不要承诺语义正确 |
 
 ## 4. 结论怎么判读

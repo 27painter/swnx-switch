@@ -138,3 +138,52 @@ COM 持续 `-2146959355`；报告怀疑与前面 3 次 COM 批量启停有关。
   未在本机人为制造"SW 起不来"状态去复现（避免把机器弄坏）。
 - **`keep_app` 的许可影响**：保持 SW 常驻会持续占用许可证席位，长时间不用需要手动关闭。
 - **NX 侧**：本报告只涉及 SolidWorks 侧；NX 的 `keep_app` 无意义（批处理进程本来就一次性）。
+
+## 9. 第二次使用报告（2026-11-14 14:2x，NX → SolidWorks）
+
+第二次真机任务是 NX `.prt` → SolidWorks `.SLDPRT`：37.3 s、15 项检查 14 pass / 1 info warn / 0 fail。
+报告确认了几件事，也提出了一个新问题。
+
+### 9.1 保留并被验证的设计
+
+- **异步两段式**（`convert_start` + `job_status`）是报告认为"0.2.0 相比上一版最明显的提升"：
+  立即拿到 job id、阶段时间线能看出卡在哪一步。
+- **preflight + 实例复用**：预检启动的 SW 被后续转换复用，导入段只需 3.9 s，没有启动类问题。
+- **双内核交叉回读校验**：NX 读源件、SW 读转换件再比对，PASS 的含义是"几何保持"而不是"文件存在"。
+- **报告就近落盘**、**中文路径无障碍**。
+
+### 9.2 唯一遗留问题：`swnx_probe {deep:true}` 仍报 not lossless JSON
+
+报告现象：`tool "mcp__swnx-switch__swnx_probe" returned invalid output: value is not lossless JSON`。
+报告判断"大概率是某个嵌套字段绕过了清洗"——判断正确，但根因不是 `NaN`。
+
+**根因（已复现）**：deep 探针的 payload 里嵌了驱动的原始 JSON，NX 面采样轴里带 **`-0.0`**。
+宿主把 `-0` 也算作"非无损 JSON"（`Object.is(value, -0)`），而 `json.dumps(-0.0)` 会合法地写出
+`-0.0`；旧 `wire.dumps` 的策略是"先直接序列化，失败再清洗"，于是这条路径根本没有触发清洗。
+
+复现脚本 `work/verify/probe_wire_scan.py` 在修复前打印：
+
+```
+HOST-REJECT negative zero at structuredContent.backends[0].deep_probe.payload.part.face_samples[0].axis[1] = -0.0
+...（共 6 处）
+```
+
+**修复**：`wire.sanitize` 把 `-0.0` 归一为 `0.0`，把超 2^53 的整数转成字符串；`wire.dumps` 去掉
+快路径，**总是**先清洗；新增 `wire.scan()` 作为宿主规则的唯一镜像。修复后同一脚本输出
+`structuredContent: clean for the host's lossless rules`（deep 负载 51 115 字节）。
+
+### 9.3 采纳的小建议（报告第四节 2–6）
+
+| 建议 | 实现 |
+|---|---|
+| 2 阶段列表直接给每段耗时 | 阶段项新增 `delta_s`，`job_status` 文本形如 `export@10.0s(+1.6s)` |
+| 3 阶段带 backend 名 | 标签追加 `[backend=solidworks]` / `[exchange=parasolid]` |
+| 4 目标扩展名大小写 + 回显实际落盘名 | `paths["target_written"]`，与请求不同时给 warning（Windows 不区分大小写但脚本匹配区分） |
+| 5 提示同目录同名不同后缀的旧文件 | 成功后扫描同 stem 的其它 CAD 扩展名并 warning |
+| 6 `report_dir` 选项 | MCP 工具参数与 CLI `--report-dir`（0.2.0 已有 CLI，0.2.1 补齐工具参数） |
+| 1 协议级回归测试 | `test_every_tool_response_is_lossless_json`：真起 MCP 子进程，逐个工具调用并按 `wire.scan` 校验 |
+
+### 9.4 仍未覆盖
+
+- `probe deep` 的 NX 段（10 s）依赖本机 NX 许可；`work/verify/probe_wire_scan.py` 需要真机跑。
+- 报告建议的"超长整数"拒绝规则：本机没有出现，已按规则实现（>2^53 → 字符串）并有单测。

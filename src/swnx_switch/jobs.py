@@ -134,8 +134,18 @@ class JobManager:
             if record is None or record.state != "running":
                 return
             record.stage = stage
+            at_s = round(time.time() - record.started_ts, 2)
+            # ``delta_s`` saves every caller from doing the subtraction itself
+            # (user report suggestion 2); it is the time this stage took, so a
+            # 37 s conversion immediately shows which step is the slow one.
+            previous = record.stages[-1]["at_s"] if record.stages else 0.0
             record.stages.append(
-                {"stage": stage, "at_s": round(time.time() - record.started_ts, 2), "info": info or {}}
+                {
+                    "stage": stage,
+                    "at_s": at_s,
+                    "delta_s": round(max(0.0, at_s - previous), 2),
+                    "info": info or {},
+                }
             )
 
     def _prune_locked(self) -> None:

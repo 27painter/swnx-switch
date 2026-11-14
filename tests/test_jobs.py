@@ -41,6 +41,7 @@ def test_job_records_stages_and_result() -> None:
     assert snapshot["stage"] == "done"
     assert snapshot["result"]["verdict"] == "pass"
     assert [stage["stage"] for stage in snapshot["stages"]] == ["source_read", "export"]
+    assert all("delta_s" in stage and stage["delta_s"] >= 0 for stage in snapshot["stages"]), snapshot["stages"]
     assert snapshot["elapsed_s"] >= 0
     assert snapshot["params"]["source"] == "a.sldprt"
 

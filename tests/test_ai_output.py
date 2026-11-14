@@ -62,6 +62,49 @@ def test_loads_strict_rejects_nan() -> None:
     raise AssertionError("strict parser must reject NaN")
 
 
+def test_negative_zero_is_normalised() -> None:
+    """The host rejects -0.0 even though it is valid JSON text.
+
+    Real failure (2026-11-14 14:2x): ``swnx_probe {deep: true}`` embedded raw NX
+    face axes containing ``-0.0``; ``json.dumps`` wrote ``-0.0`` and the host
+    answered ``value is not lossless JSON``.  The old ``dumps`` had a fast path
+    that skipped sanitising, so the value survived.
+    """
+    cleaned = wire.sanitize({"axis": [-0.0, 0.0, 1.0]})
+    assert cleaned["axis"][0] == 0.0
+    assert str(cleaned["axis"][0]) == "0.0"
+    text = wire.dumps({"axis": [-0.0]})
+    assert "-0.0" not in text, text
+    assert wire.scan(json.loads(text)) == []
+
+
+def test_unsafe_integer_becomes_string() -> None:
+    huge = 2**63 - 1
+    cleaned = wire.sanitize({"serial": huge, "count": 7})
+    assert cleaned["serial"] == str(huge)
+    assert cleaned["count"] == 7
+    assert wire.scan(json.loads(wire.dumps({"serial": huge}))) == []
+
+
+def test_scan_flags_what_the_host_rejects() -> None:
+    problems = wire.scan({"a": float("nan"), "b": [-0.0], "c": 2**64, "d": {"e": float("inf")}})
+    kinds = {kind for _, kind, _ in problems}
+    assert "non-finite float" in kinds
+    assert "negative zero" in kinds
+    assert "int outside the safe range" in kinds
+    assert wire.scan({"ok": [1, 2.5, "x", None, True]}) == []
+
+
+def test_stage_label_shows_delta_and_backend() -> None:
+    """``job_status`` must not make the caller do the subtraction (suggestion 2/3)."""
+    assert tools._stage_label({"stage": "export", "at_s": 10.0, "delta_s": 1.6, "info": {"exchange": "parasolid"}}) == (
+        "export@10.0s(+1.6s)[exchange=parasolid]"
+    )
+    assert tools._stage_label({"stage": "preflight", "at_s": 10.1, "delta_s": 10.1, "info": {"backend": "solidworks"}}) == (
+        "preflight@10.1s(+10.1s)[backend=solidworks]"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # slim payload
 # --------------------------------------------------------------------------- #
@@ -221,6 +264,82 @@ def test_convert_start_and_job_status_over_mcp() -> None:
 
         unknown = _call(server, "swnx_job_status", {"job_id": "job-nope"})
         assert unknown["isError"] is True
+    finally:
+        server.close()
+
+
+def test_every_tool_response_is_lossless_json() -> None:
+    """Protocol-level regression for report suggestion 1.
+
+    Every tool that can run without CAD is called through a real MCP subprocess,
+    and each response is checked against the host's lossless-JSON rules
+    (NaN/Infinity, -0.0, out-of-range integers).  This is the test that would
+    have caught the ``swnx_probe {deep:true}`` failure where raw NX face axes
+    carried ``-0.0`` into ``structuredContent``.
+    """
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    reference = json.loads((FIXTURES / "ref_part.json").read_text(encoding="utf-8"))
+    reference["model"]["mass_properties"]["volume_mm3"] = float("nan")
+    for sample in reference.get("model", {}).get("geometry", {}).get("face_samples", []):
+        if isinstance(sample.get("axis"), list) and sample["axis"]:
+            sample["axis"][0] = -0.0  # what NX actually returns
+    nasty = SCRATCH / "ref_nasty.json"
+    nasty.write_text(json.dumps(reference, ensure_ascii=False), encoding="utf-8")
+
+    calls = [
+        ("swnx_list_routes", {}),
+        ("swnx_probe", {"deep": False}),
+        ("swnx_part_brief", {"ir": str(FIXTURES / "ref_part.json")}),
+        ("swnx_read_part", {"path": str(SCRATCH / "missing.SLDPRT")}),
+        (
+            "swnx_compare_parts",
+            {"reference": str(nasty), "candidate": str(FIXTURES / "candidate_identical.json")},
+        ),
+        ("swnx_job_status", {"job_id": "job-does-not-exist"}),
+    ]
+
+    server = _Server()
+    try:
+        server.rpc("initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "t"}})
+        for name, arguments in calls:
+            reply = server.rpc("tools/call", {"name": name, "arguments": arguments})
+            assert "result" in reply or "error" in reply, (name, reply)
+            problems = wire.scan(reply, name)
+            assert problems == [], f"{name} emitted host-rejected values: {problems[:5]}"
+            result = reply.get("result") or {}
+            if "content" in result:
+                assert isinstance(result["content"], list) and result["content"]
+                assert isinstance(result["content"][0]["text"], str)
+    finally:
+        server.close()
+
+
+def test_job_status_stage_entries_carry_delta() -> None:
+    """Stage entries must include ``delta_s`` so the caller sees the slow step."""
+    SCRATCH.mkdir(parents=True, exist_ok=True)
+    server = _Server()
+    try:
+        server.rpc("initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "t"}})
+        started = _call(
+            server,
+            "swnx_convert_start",
+            {"source": str(SCRATCH / "nope.SLDPRT"), "target": str(SCRATCH / "nope.prt")},
+        )
+        job_id = started["structuredContent"]["job_id"]
+        snapshot = None
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            reply = _call(server, "swnx_job_status", {"job_id": job_id})
+            snapshot = reply["structuredContent"]
+            if snapshot["state"] != "running":
+                break
+            time.sleep(0.05)
+        assert snapshot is not None
+        for entry in snapshot["stages"]:
+            assert "delta_s" in entry, entry
+            assert entry["delta_s"] >= 0
+            assert isinstance(entry["info"], dict)
+        assert wire.scan(snapshot) == []
     finally:
         server.close()
 

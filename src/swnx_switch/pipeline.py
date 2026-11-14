@@ -101,6 +101,7 @@ class ConversionResult:
             "mode": f"{self.source_format}->{self.target_format}",
             "source": str(self.source),
             "target": str(self.target),
+            "target_written": self.paths.get("target_written"),
             "target_sha256": self.paths.get("target_sha256"),
             "run_dir": str(self.run_dir),
             "reference_ir": self.paths.get("reference_ir"),
@@ -268,8 +269,15 @@ class Pipeline:
 
             result.seconds = round(time.time() - started, 3)
             if result.ok and dst.exists():
+                # Report the name that actually landed on disk: SolidWorks may
+                # save ``x.SLDPRT`` when asked for ``x.sldprt`` (report
+                # suggestion 4), and a sibling with a different extension is
+                # easy to confuse with this run's output (suggestion 5).
+                self._resolve_written_target(result)
+                self._warn_sibling_files(result)
+                written = Path(result.paths.get("target_written") or dst)
                 try:
-                    result.paths["target_sha256"] = ir.sha256_of(dst)
+                    result.paths["target_sha256"] = ir.sha256_of(written)
                 except OSError as exc:  # pragma: no cover - unreadable target
                     result.warnings.append(f"could not hash the target: {exc}")
             self._verify(result, tolerances=tolerances, report=report, task=task)
@@ -440,6 +448,52 @@ class Pipeline:
         result.warnings.append("target is an exchange format: the parametric history is not carried, only the B-Rep")
 
     # ------------------------------------------------------------------ #
+    # post-flight: the file that actually landed on disk
+    # ------------------------------------------------------------------ #
+    def _resolve_written_target(self, result: ConversionResult) -> None:
+        """Record the on-disk spelling of the target and warn when it differs.
+
+        Windows is case-insensitive, so asking for ``part.sldprt`` may produce
+        ``part.SLDPRT``; a script that greps the exact requested name then fails
+        for a reason that has nothing to do with the conversion.
+        """
+        target = result.target
+        actual = target
+        try:
+            for entry in target.parent.iterdir():
+                if entry.name.lower() == target.name.lower():
+                    actual = entry
+                    break
+        except OSError:  # pragma: no cover - unreadable output directory
+            pass
+        result.paths["target_written"] = str(actual)
+        if actual.name != target.name:
+            result.warnings.append(
+                f"目标实际写入名是 {actual.name}（请求的是 {target.name}；Windows 不区分大小写，脚本按名字匹配时注意）"
+            )
+
+    def _warn_sibling_files(self, result: ConversionResult) -> None:
+        """Warn about same-stem files with another CAD extension.
+
+        A folder where ``switch_test1.prt`` (a previous run) sits beside the new
+        ``switch_test1.SLDPRT`` is the easiest way to open the wrong file.
+        """
+        target = Path(result.paths.get("target_written") or result.target)
+        try:
+            for entry in target.parent.iterdir():
+                if not entry.is_file() or entry == target:
+                    continue
+                if entry.stem.lower() != target.stem.lower():
+                    continue
+                if entry.suffix.lower() == target.suffix.lower():
+                    continue
+                result.warnings.append(
+                    f"同目录还有同名不同后缀的文件: {entry.name}（可能是上一次转换的旧产物，别点错）"
+                )
+        except OSError:  # pragma: no cover - unreadable output directory
+            pass
+
+    # ------------------------------------------------------------------ #
     # verification + reporting
     # ------------------------------------------------------------------ #
     def _verify(self, result: ConversionResult, *, tolerances: dict | None, report: bool, task: str | None) -> None:
@@ -468,7 +522,7 @@ class Pipeline:
         self._emit("report")
         meta = {
             "source": str(result.source),
-            "target": str(result.target),
+            "target": result.paths.get("target_written") or str(result.target),
             "target_sha256": result.paths.get("target_sha256"),
             "mode": f"{result.source_format} -> {result.target_format}",
             "task": task,
@@ -505,7 +559,7 @@ class Pipeline:
 
         # A copy beside the produced part: a user should not have to dig into
         # work/<run-id>/ to find out whether the conversion was good (report P2-1).
-        target_path = result.target.resolve()
+        target_path = Path(result.paths.get("target_written") or result.target).resolve()
         near_dir = self._report_dir or target_path.parent
         near_dir.mkdir(parents=True, exist_ok=True)
         stem = target_path.stem
