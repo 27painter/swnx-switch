@@ -1,4 +1,4 @@
-# 可靠性改进记录 / Reliability notes (0.2.0)
+# 可靠性改进记录 / Reliability notes (0.2.0 / 1.2.0)
 
 来源：一份真实调用方的使用报告（2026-11-14，桌面 `swnx-switch使用体验与改进建议报告.md`）。
 报告里有三个 P0、四个 P1、三个 P2。本文逐条记录**现象 → 根因 → 修复 → 如何验证**，
@@ -180,7 +180,7 @@ HOST-REJECT negative zero at structuredContent.backends[0].deep_probe.payload.pa
 | 3 阶段带 backend 名 | 标签追加 `[backend=solidworks]` / `[exchange=parasolid]` |
 | 4 目标扩展名大小写 + 回显实际落盘名 | `paths["target_written"]`，与请求不同时给 warning（Windows 不区分大小写但脚本匹配区分） |
 | 5 提示同目录同名不同后缀的旧文件 | 成功后扫描同 stem 的其它 CAD 扩展名并 warning |
-| 6 `report_dir` 选项 | MCP 工具参数与 CLI `--report-dir`（0.2.0 已有 CLI，0.2.1 补齐工具参数） |
+| 6 `report_dir` 选项 | MCP 工具参数与 CLI `--report-dir`（0.2.0 已有 CLI，1.2.0 补齐工具参数） |
 | 1 协议级回归测试 | `test_every_tool_response_is_lossless_json`：真起 MCP 子进程，逐个工具调用并按 `wire.scan` 校验 |
 
 ### 9.4 仍未覆盖

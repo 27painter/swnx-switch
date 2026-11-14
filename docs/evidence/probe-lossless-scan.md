@@ -1,4 +1,4 @@
-# `swnx_probe {deep:true}` lossless-JSON failure — reproduction and fix (0.2.1)
+# `swnx_probe {deep:true}` lossless-JSON failure — reproduction and fix (1.2.0)
 
 Second real-machine usage report (2026-11-14 14:2x) observed:
 
@@ -33,7 +33,7 @@ samples contain `-0.0` axes. `-0.0` is *valid JSON text* (`json.dumps` writes
 path never ran the sanitiser; the host rejects `-0` because a JS number would
 normalise it (`Object.is(value, -0)`).
 
-## After the fix (0.2.1)
+## After the fix (1.2.0)
 
 ```
 probe_shallow: 4099 bytes  -> structuredContent: clean for the host's lossless rules

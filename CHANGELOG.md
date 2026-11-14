@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.1 — 2026-11-14
+## 1.2.0 — 2026-11-14 (此前编号 0.2.1)
 
 第二次真机使用报告（14:20–14:33，NX → SolidWorks 一次成功、PASS）的收尾：`swnx_probe {deep:true}`
 仍被判过一次 `invalid output: value is not lossless JSON`，另有 5 条小改进。逐条对照见

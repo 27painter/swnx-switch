@@ -375,7 +375,7 @@ Full list and the verified/unverified table: [docs/limitations.md](docs/limitati
 | The second conversion hung for ~7 minutes before `CO_E_SERVER_EXEC_FAILURE` | old behaviour: reactivating SW right after exit, with a single 420 s wait | 0.2.0 retries with backoff and polls the ROT for 90 s; see `diagnose.md` in that job's directory if it still fails |
 | `SLDWORKS.exe` exits immediately after several conversions | repeated COM start/stop racing the single-instance/licence teardown | pass `--keep-app` (or `keep_app=true`) to reuse one instance; start SW manually once if needed |
 | `probe` says available but SW cannot start | the old `available` only proved exe/ProgID existed | run `probe --deep`: it reports launchable/reachable/last_error |
-| `probe --deep` fails with `value is not lossless JSON` | 0.2.0 sanitised NaN but not `-0.0`, which NX face axes contain | fixed in 0.2.1: `-0.0` -> `0.0`, integers beyond 2^53 -> strings, `wire.scan()` guards it |
+| `probe --deep` fails with `value is not lossless JSON` | 0.2.0 sanitised NaN but not `-0.0`, which NX face axes contain | fixed in 1.2.0: `-0.0` -> `0.0`, integers beyond 2^53 -> strings, `wire.scan()` guards it |
 
 **Three driver traps (already worked around — do not undo)**:
 SolidWorks must not `OpenDoc6` a foreign `.prt`/`.x_t` (it kills the COM server; use
@@ -460,7 +460,10 @@ design:
 
 ## 15. Version and roadmap
 
-**0.2.1 (current)**: fixes the last `probe --deep` wire failure (sanitiser skipped `-0.0`), reports per-stage `delta_s`, the written file name and same-name siblings, and adds `report_dir`; 138 tests.\n\n**0.2.0**: reliability release on top of 0.1.0 — strict JSON tool boundary and slim
+**1.2.0 (current)**: fixes the last `probe --deep` wire failure (sanitiser skipped `-0.0`), reports
+per-stage `delta_s`, the written file name and same-name siblings, and adds `report_dir`; 138 tests.
+
+**0.2.0**: reliability release on top of 0.1.0 — strict JSON tool boundary and slim
 payloads, async jobs (`convert_start` + `job_status`), SolidWorks COM retry and ROT polling,
 `--keep-app` instance reuse, `diagnose.md`, three-state `probe --deep`, reports beside the target,
 request validation. 131 automated tests.

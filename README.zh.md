@@ -356,7 +356,7 @@ AI 会依次调 `swnx_probe` →（可选 `swnx_read_part`）→ `swnx_convert_s
 | 第二次转换卡住约 7 分钟才报 `CO_E_SERVER_EXEC_FAILURE` | 旧版：SW 刚退出就再激活，且只做一次 420 s 长等 | 0.2.0 已改为退避重试 + 90 s ROT 轮询；仍失败看该作业目录下的 `diagnose.md` |
 | 连续转换后 `SLDWORKS.exe` 启动即退出 | 反复 COM 启停触发单实例/许可释放竞争 | 加 `--keep-app`（或 `keep_app=true`）复用同一实例；必要时手动启动一次 SW |
 | `probe` 说 available 但实际起不来 | 旧版 available 只证明 exe/ProgID 存在 | 用 `probe --deep`：会返回 launchable/reachable/last_error |
-| `probe --deep` 报 `value is not lossless JSON` | 0.2.0 的出口清洗漏了 `-0.0`（deep 探针 payload 里有 NX 面轴的 `-0.0`） | 0.2.1 已修：`-0.0` 归一为 `0.0`，超 2^53 整数转字符串；`wire.scan()` 做回归 |
+| `probe --deep` 报 `value is not lossless JSON` | 0.2.0 的出口清洗漏了 `-0.0`（deep 探针 payload 里有 NX 面轴的 `-0.0`） | 1.2.0 已修：`-0.0` 归一为 `0.0`，超 2^53 整数转字符串；`wire.scan()` 做回归 |
 
 **驱动层三个坑（已绕过，勿改回）**：
 SolidWorks 不能用 `OpenDoc6` 打开外来 `.prt`/`.x_t`（会打死 COM 服务器，必须
@@ -432,7 +432,9 @@ python scripts\verify_e2e.py --mode parasolid --force
 
 ## 15. 版本与路线图
 
-**0.2.1（当前）**：0.2.1 修掉 `probe --deep` 的唯一遗留报错（出口清洗漏 `-0.0`），并把阶段耗时、实际落盘名、同名旧文件提示、`report_dir` 补齐；138 项测试。\n\n**0.2.0**：在 0.1.0 的双向转换/校验之上，按真实使用报告补可靠性：
+**1.2.0（当前）**：1.2.0 修掉 `probe --deep` 的唯一遗留报错（出口清洗漏 `-0.0`），并把阶段耗时、实际落盘名、同名旧文件提示、`report_dir` 补齐；138 项测试。
+
+**0.2.0**：在 0.1.0 的双向转换/校验之上，按真实使用报告补可靠性：
 严格 JSON 出口与瘦身返回值、异步作业（`convert_start` + `job_status`）、SolidWorks COM 重试与
 ROT 轮询、`--keep-app` 实例复用、`diagnose.md`、三态 `probe --deep`、报告就近、入口校验。
 131 项自动化测试。

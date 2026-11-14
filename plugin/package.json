@@ -1,6 +1,6 @@
 {
   "name": "swnx-switch",
-  "version": "0.2.1",
+  "version": "1.2.0",
   "description": "DSH plugin: registers swnx-switch as an MCP server so an agent can read SolidWorks/NX parts and convert between them with tolerance-verified STEP/Parasolid interchange.",
   "license": "MIT",
   "author": "27painter",
